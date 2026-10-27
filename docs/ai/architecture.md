@@ -30,6 +30,8 @@ ZAP tourne en plus dans son propre conteneur, piloté par les workers via son AP
 | GET | `/auth/me` | Utilisateur du jeton |
 | GET | `/health` | État de l'API et de la base (sondes) |
 | POST | `/targets` | Déclarer un site, recevoir le jeton DNS |
+| GET | `/targets` | Lister les cibles de l'utilisateur |
+| GET | `/targets/{id}` | Consulter une de ses cibles |
 | POST | `/targets/{id}/verify` | Vérifier la propriété |
 | POST | `/scans` | Lancer un scan (202 Accepted) |
 | GET | `/scans/{id}` | État et progression |
@@ -38,7 +40,8 @@ ZAP tourne en plus dans son propre conteneur, piloté par les workers via son AP
 ## Modèle de données
 
 - `users` : id, email, mot de passe haché.
-- `targets` : id, user_id, domaine, jeton de vérification, vérifiée le.
+- `targets` : id, user_id, domaine, jeton de vérification, créée le, vérifiée le ;
+  unicité (user_id, domaine), suppression en cascade avec le compte.
 - `scans` : id, target_id, état (pending, running, done, failed), créé le, terminé le, note globale.
 - `findings` : id, scan_id, scanner, catégorie, sévérité, titre, preuve, recommandation.
 
@@ -63,6 +66,12 @@ tests/
 
 Le domaine ne dépend ni de FastAPI ni de PostgreSQL : c'est ce qui le rend testable.
 Il déclare ses besoins sous forme de ports (`Protocol`) ; `infra/` fournit les adaptateurs.
+`domain/targets.py` contient `RegisteredTarget`, la normalisation des domaines et les
+cas d'usage de déclaration/vérification ; `domain/ports.py` déclare `TargetRepository`
+et `TxtRecordResolver`. `infra/target_repository.py` adapte le stockage PostgreSQL,
+`security/dns_verification.py` adapte dnspython et `api/targets.py` expose les routes
+authentifiées. La migration `0002_create_targets_table.py` crée la table `targets`.
+La fabrique `create_app` accepte un `txt_resolver` injectable, conservé dans `app.state`.
 Une requête HTTP correspond à une transaction : le repository ne fait jamais `commit`,
 la dépendance `SessionDep` valide avant l'envoi de la réponse ou annule en cas d'erreur.
 

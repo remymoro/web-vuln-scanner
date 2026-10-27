@@ -4,7 +4,17 @@ Point le plus important : un scanner mal protégé devient une arme.
 
 ## Preuve de propriété
 
-Aucun scan sans enregistrement DNS TXT validé (par exemple `scanner-verify=<jeton>`). Alternative : un fichier à déposer dans `/.well-known/`.
+Aucun scan sans enregistrement DNS TXT validé. Chaque cible reçoit un jeton propre,
+à publier sous la forme exacte `scanner-verify=<jeton>` sur le nom d'hôte déclaré
+(normalisé en minuscules et IDNA, sans point final). Prouver `example.com` n'autorise
+pas `www.example.com` : chaque nom doit être déclaré et vérifié séparément.
+
+Les fragments d'un même TXT sont concaténés, puis décodés en UTF-8. Après suppression
+des espaces aux extrémités (`strip()`), la valeur complète est comparée strictement,
+en temps constant (`hmac.compare_digest`) : aucun préfixe, suffixe ou changement de
+casse n'est accepté. Une cible déjà vérifiée conserve sa date sans nouvelle requête
+DNS. `RegisteredTarget.scan_target()` refuse toute cible non vérifiée ; les routes
+masquent les cibles des autres utilisateurs avec un 404.
 
 ## Anti-SSRF (`security/`)
 
