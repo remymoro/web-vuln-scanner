@@ -4,7 +4,7 @@ Ordre : tout faire marcher avec Docker Compose d'abord, puis passer à k3s, puis
 
 ## Docker Compose (`chore/docker-compose`)
 
-`docker compose up` lance tout en local : API, worker, PostgreSQL, Redis (persistance activée) et un site cible volontairement mal configuré pour la démo.
+`docker compose up` lance tout en local : API, worker, PostgreSQL, Redis (persistance activée) et un site cible volontairement mal configuré pour la démo. Le conteneur ZAP arrive avec `feat/scanner-zap`, dans le réseau isolé décrit dans `security.md`.
 
 ## k3s sur Proxmox (`feat/k8s`)
 
