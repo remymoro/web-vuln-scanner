@@ -27,10 +27,10 @@ docs/ai/        Architecture et feuille de route
 
 ## Tests et lint
 
-Prérequis : Python 3.12 ou supérieur, `uv` et Docker (pour la base de test).
+Prérequis : Python 3.12 ou supérieur, `uv` et Docker (pour PostgreSQL et Redis de test).
 
 ```sh
-# Base PostgreSQL jetable sur le port 5433 (données en mémoire)
+# PostgreSQL sur le port 5433 et Redis sur le port 6380, jetables
 docker compose -f docker-compose.test.yml up -d --wait
 
 cd backend
@@ -40,16 +40,21 @@ uv run ruff check .
 uv run ruff format --check .
 ```
 
-Les tests qui touchent la base échouent avec un message explicite si elle n'est pas lancée.
-Arrêter la base, depuis la racine du dépôt : `docker compose -f docker-compose.test.yml down`.
+Les tests d'intégration échouent avec un message explicite si un service est injoignable.
+`TEST_DATABASE_URL` et `TEST_REDIS_URL` permettent de changer leurs adresses ; la base Redis
+de test (par défaut `redis://localhost:6380/0`) est vidée avant et après chaque test qui l'utilise.
+Arrêter les services, depuis la racine : `docker compose -f docker-compose.test.yml down`.
 
 ## Lancer l'API en local
 
-Il faut une base PostgreSQL joignable à l'adresse de `DATABASE_URL`. `.env.example` vise
+Il faut PostgreSQL à l'adresse de `DATABASE_URL` et Redis à celle de `REDIS_URL`.
+`SCAN_TIMEOUT_SECONDS` borne la durée d'un scan (300 s par défaut, de 1 à 3600 s),
+`SCAN_COOLDOWN_SECONDS` espace deux scans d'une même cible (600 s par défaut).
+`.env.example` vise
 `localhost:5432/scanner`, que fournira le Docker Compose de la branche `chore/docker-compose`.
 En attendant, on peut réutiliser la base de test en mettant dans `.env`
 `DATABASE_URL=postgresql+psycopg://scanner:scanner@localhost:5433/scanner_test` ;
-attention, chaque lancement de pytest vide cette base.
+et `REDIS_URL=redis://localhost:6380/0` ; attention, pytest vide ces bases de test.
 
 ```sh
 cd backend
@@ -59,3 +64,6 @@ uv run uvicorn app.api.main:create_app --factory --reload
 ```
 
 Documentation interactive : http://127.0.0.1:8000/docs
+
+Dans un autre terminal, depuis `backend/`, exporter `REDIS_URL` puis lancer le worker : `uv run rq worker scans --url "$REDIS_URL"`.
+Ajouter `--with-scheduler` à cette commande pour activer les relances différées (10 puis 30 s).
