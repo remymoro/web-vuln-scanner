@@ -1,0 +1,54 @@
+# Les ids restent stables, quel que soit le motif du constat.
+# Cookies : un constat par cookie et attribut manquant, avec les ids
+# headers.cookie.secure, headers.cookie.httponly et headers.cookie.samesite.
+# Plusieurs cookies peuvent partager un id ; l'evidence cite uniquement leur nom.
+- id: headers.hsts
+  header: Strict-Transport-Security
+  check: min_max_age
+  severity: medium
+  title: Protection HSTS insuffisante
+  description: Le navigateur peut utiliser HTTP si HSTS est absent ou trop court.
+  recommendation: Ajouter Strict-Transport-Security avec un max-age d'au moins un an.
+  value: 31536000
+
+- id: headers.csp
+  header: Content-Security-Policy
+  check: must_not_contain
+  severity: medium
+  title: Politique CSP absente ou trop permissive
+  description: Une CSP absente ou autorisant unsafe-inline réduit la protection contre les injections.
+  recommendation: Définir une Content-Security-Policy sans unsafe-inline.
+  value: unsafe-inline
+
+- id: headers.x_content_type_options
+  header: X-Content-Type-Options
+  check: equals
+  severity: low
+  title: Protection contre la détection de type absente ou incorrecte
+  description: Le navigateur peut interpréter une ressource avec un type inattendu.
+  recommendation: Définir X-Content-Type-Options à nosniff.
+  value: nosniff
+
+- id: headers.referrer_policy
+  header: Referrer-Policy
+  check: present
+  severity: low
+  title: Politique de référent absente
+  description: Les informations du référent peuvent être transmises sans politique explicite.
+  recommendation: Définir Referrer-Policy, par exemple strict-origin-when-cross-origin.
+
+- id: headers.permissions_policy
+  header: Permissions-Policy
+  check: present
+  severity: low
+  title: Politique de permissions absente
+  description: Les fonctionnalités du navigateur ne sont pas limitées explicitement.
+  recommendation: Définir Permissions-Policy pour restreindre les fonctionnalités inutiles.
+
+- id: headers.cookie
+  header: Set-Cookie
+  check: cookie_flags
+  severity: medium
+  title: Attribut de protection du cookie absent
+  description: Un cookie sans Secure, HttpOnly ou SameSite bénéficie de protections réduites.
+  recommendation: Ajouter Secure, HttpOnly et SameSite aux cookies concernés.
