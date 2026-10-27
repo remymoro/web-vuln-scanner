@@ -1,0 +1,19 @@
+# Base PostgreSQL jetable pour les tests locaux :
+#   docker compose -f docker-compose.test.yml up -d
+# Données en mémoire (tmpfs) : tout disparaît à l'arrêt du conteneur.
+services:
+  postgres-test:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: scanner
+      POSTGRES_PASSWORD: scanner
+      POSTGRES_DB: scanner_test
+    ports:
+      - "127.0.0.1:5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scanner -d scanner_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
