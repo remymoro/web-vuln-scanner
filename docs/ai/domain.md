@@ -8,7 +8,7 @@ Un `Finding` est un constat : une chose précise observée sur le site. Tous les
 
 | Champ | Type | Rôle | Exemple (HSTS absent) |
 | --- | --- | --- | --- |
-| `id` | texte | Identifiant stable de la règle | `headers.hsts.missing` |
+| `id` | texte | Identifiant stable de la règle | `headers.hsts` |
 | `scanner` | texte | Qui a produit le constat | `headers` |
 | `category` | texte | Catégorie du rapport | en-têtes HTTP |
 | `severity` | info, low, medium, high | Gravité, utilisée par la notation | `medium` |
@@ -50,6 +50,10 @@ class Scanner(Protocol):
 ```
 
 Ajouter un scanner = écrire une classe et l'enregistrer dans le registre. Rien d'autre ne change. Chaque outil externe est enveloppé dans un adaptateur qui traduit sa sortie en `Finding`.
+
+`Target` est une dataclass gelée contenant uniquement `url: str` pour le moment. Le registre est une instance explicite, conserve l’ordre d’enregistrement et refuse les noms dupliqués.
+
+`HeadersScanner` reçoit son client HTTP par injection et ne suit pas les redirections. La garde anti-SSRF de `feat/security-ssrf` devra fournir ce client. Les règles sont dans `backend/config/header_rules.yaml`. Les constats de cookies ont les ids `headers.cookie.secure`, `headers.cookie.httponly` et `headers.cookie.samesite` ; plusieurs cookies peuvent partager un id. Leur evidence contient uniquement le nom du cookie, jamais sa valeur.
 
 ## Scanners prévus
 
