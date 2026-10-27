@@ -12,10 +12,10 @@ Un `Finding` est un constat : une chose précise observée sur le site. Tous les
 | `scanner` | texte | Qui a produit le constat | `headers` |
 | `category` | texte | Catégorie du rapport | en-têtes HTTP |
 | `severity` | info, low, medium, high | Gravité, utilisée par la notation | `medium` |
-| `title` | texte | Résumé en une ligne | En-tête HSTS absent |
-| `description` | texte | Pourquoi c'est un problème | Le navigateur peut être forcé en HTTP |
-| `evidence` | texte | Ce qui a été réellement observé | Aucun en-tête Strict-Transport-Security dans la réponse |
-| `recommendation` | texte | Correction à appliquer | Ajouter HSTS avec un max-age d'au moins un an |
+| `title` | texte | Résumé en une ligne | Protection HSTS insuffisante |
+| `description` | texte | Pourquoi c'est un problème | Le navigateur peut utiliser HTTP si HSTS est absent ou trop court. |
+| `evidence` | texte | Ce qui a été réellement observé | En-tête Strict-Transport-Security absent |
+| `recommendation` | texte | Correction à appliquer | Ajouter Strict-Transport-Security avec un max-age d'au moins un an. |
 
 ```python
 from dataclasses import dataclass
@@ -53,7 +53,7 @@ Ajouter un scanner = écrire une classe et l'enregistrer dans le registre. Rien 
 
 `Target` est une dataclass gelée contenant uniquement `url: str` pour le moment. Le registre est une instance explicite, conserve l’ordre d’enregistrement et refuse les noms dupliqués.
 
-`HeadersScanner` reçoit son client HTTP par injection et ne suit pas les redirections. La garde anti-SSRF de `feat/security-ssrf` devra fournir ce client. Les règles sont dans `backend/config/header_rules.yaml`. Les constats de cookies ont les ids `headers.cookie.secure`, `headers.cookie.httponly` et `headers.cookie.samesite` ; plusieurs cookies peuvent partager un id. Leur evidence contient uniquement le nom du cookie, jamais sa valeur.
+`HeadersScanner` reçoit son client HTTP par injection et ne suit pas les redirections. En production, ce client est créé par `create_safe_client()` (`security/ssrf.py`). Les règles sont dans `backend/config/header_rules.yaml`. Les constats de cookies ont les ids `headers.cookie.secure`, `headers.cookie.httponly` et `headers.cookie.samesite` ; plusieurs cookies peuvent partager un id. Leur evidence contient uniquement le nom du cookie, jamais sa valeur.
 
 ## Scanners prévus
 
@@ -61,7 +61,7 @@ Ajouter un scanner = écrire une classe et l'enregistrer dans le registre. Rien 
 - `TlsScanner` : sslyze (bibliothèque importée) — versions de protocole, suites de chiffrement, certificat.
 - `WafScanner` : wafw00f (bibliothèque importée) — requêtes de test inoffensives et analyse des réponses.
 - `RateLimitScanner` : code maison, rafale contrôlée et limitée, détection des réponses 429.
-- `ZapPassiveScanner` : scan passif ZAP uniquement (pas de scan actif par défaut).
+- `ZapPassiveScanner` (branche `feat/scanner-zap`) : scan passif ZAP uniquement (pas de scan actif par défaut).
 
 Écartés : API hébergées (SSL Labs, Mozilla Observatory : quotas, c'est leur serveur qui scanne), testssl.sh (doublon de sslyze), Nikto (bruyant, daté). Wapiti et Nuclei : plus tard, sites vérifiés uniquement.
 
