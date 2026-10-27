@@ -43,7 +43,17 @@ def create_app(
     app = FastAPI(title="web-vuln-scanner", lifespan=lifespan)
     app.state.settings = settings
     app.state.password_hasher = password_hasher or Argon2PasswordHasher()
-    app.state.txt_resolver = txt_resolver if txt_resolver is not None else DnspythonTxtResolver()
+    app.state.txt_resolver = (
+        txt_resolver
+        if txt_resolver is not None
+        else DnspythonTxtResolver(
+            nameservers=(
+                [str(ip) for ip in settings.dns_nameservers]
+                if settings.dns_nameservers is not None
+                else None
+            )
+        )
+    )
     app.state.scan_queue = (
         scan_queue
         if scan_queue is not None
