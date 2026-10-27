@@ -115,6 +115,7 @@ class FakeBackend(httpcore.NetworkBackend):
         "::1",
         "::",
         "fe80::1",
+        "fec0::1",
         "fc00::1",
         "::ffff:127.0.0.1",
         "::ffff:10.0.0.1",

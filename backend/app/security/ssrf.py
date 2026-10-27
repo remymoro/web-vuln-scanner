@@ -37,6 +37,7 @@ def is_ip_allowed(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
         or ip.is_unspecified
         or ip.is_loopback
         or ip.is_link_local
+        or (isinstance(ip, ipaddress.IPv6Address) and ip.is_site_local)
         or ip.is_private
         or ip.is_reserved
     )
