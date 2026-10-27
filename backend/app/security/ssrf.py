@@ -3,6 +3,7 @@
 import ipaddress
 import socket
 from collections.abc import Iterable
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpcore
@@ -11,6 +12,10 @@ import httpx
 ALLOWED_SCHEMES = {"http", "https"}
 ALLOWED_PORTS = {80, 443}
 _NAT64 = ipaddress.IPv6Network("64:ff9b::/96")
+_PRIVATE_NETWORKS = tuple(
+    ipaddress.ip_network(network)
+    for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7")
+)
 _SOCKET_OPTION = tuple[int, int, int | bytes | bytearray] | tuple[int, int, None, int]
 
 
@@ -18,7 +23,9 @@ class SsrfBlockedError(Exception):
     """La destination ne respecte pas la politique anti-SSRF."""
 
 
-def is_ip_allowed(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+def is_ip_allowed(
+    ip: ipaddress.IPv4Address | ipaddress.IPv6Address, *, allow_private: bool = False
+) -> bool:
     if isinstance(ip, ipaddress.IPv6Address):
         embedded = []
         if ip.ipv4_mapped is not None:
@@ -32,6 +39,9 @@ def is_ip_allowed(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
         if any(not is_ip_allowed(inner) for inner in embedded):
             return False
 
+    if allow_private and any(ip in network for network in _PRIVATE_NETWORKS):
+        return True
+
     return ip.is_global and not (
         ip.is_multicast
         or ip.is_unspecified
@@ -43,7 +53,7 @@ def is_ip_allowed(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     )
 
 
-def resolve_and_check(host: str, port: int) -> list[str]:
+def resolve_and_check(host: str, port: int, *, allowed_hosts: Iterable[str] = ()) -> list[str]:
     try:
         addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except socket.gaierror as exc:
@@ -58,7 +68,7 @@ def resolve_and_check(host: str, port: int) -> list[str]:
             ip = ipaddress.ip_address(raw_ip)
         except ValueError as exc:
             raise SsrfBlockedError(f"Resolution returned an invalid IP: {raw_ip!r}") from exc
-        if not is_ip_allowed(ip):
+        if not is_ip_allowed(ip, allow_private=host in allowed_hosts):
             raise SsrfBlockedError(f"Forbidden IP {ip} for host {host!r}")
         normalized = str(ip)
         if normalized not in ips:
@@ -84,16 +94,22 @@ def _check_url_parts(url: str | httpx.URL) -> tuple[str, int]:
     return parsed.host, port
 
 
-def check_url(url: str | httpx.URL) -> None:
+def check_url(url: str | httpx.URL, *, allowed_hosts: Iterable[str] = ()) -> None:
     host, port = _check_url_parts(url)
-    resolve_and_check(host, port)
+    resolve_and_check(host, port, allowed_hosts=allowed_hosts)
 
 
 class GuardedNetworkBackend(httpcore.NetworkBackend):
     """Décore le backend : seul un littéral IP validé atteint la connexion TCP."""
 
-    def __init__(self, backend: httpcore.NetworkBackend | None = None) -> None:
+    def __init__(
+        self,
+        backend: httpcore.NetworkBackend | None = None,
+        *,
+        allowed_hosts: Iterable[str] = (),
+    ) -> None:
         self._backend = backend if backend is not None else httpcore.SyncBackend()
+        self._allowed_hosts = frozenset(allowed_hosts)
 
     def connect_tcp(
         self,
@@ -105,7 +121,7 @@ class GuardedNetworkBackend(httpcore.NetworkBackend):
     ) -> httpcore.NetworkStream:
         if port not in ALLOWED_PORTS:
             raise SsrfBlockedError(f"Port {port} is forbidden; use 80 or 443")
-        ips = resolve_and_check(host, port)
+        ips = resolve_and_check(host, port, allowed_hosts=self._allowed_hosts)
         # Réutilisable même si l'appelant fournit un générateur d'options.
         options = None if socket_options is None else tuple(socket_options)
         for index, ip in enumerate(ips):
@@ -135,10 +151,18 @@ class GuardedNetworkBackend(httpcore.NetworkBackend):
 
 
 class _GuardedTransport(httpx.HTTPTransport):
-    def __init__(self, network_backend: httpcore.NetworkBackend | None = None) -> None:
+    def __init__(
+        self,
+        network_backend: httpcore.NetworkBackend | None = None,
+        *,
+        allowed_hosts: Iterable[str] = (),
+        extra_ca_file: str | Path | None = None,
+    ) -> None:
         limits = httpx.Limits()
         super().__init__(verify=True, trust_env=False, limits=limits, retries=0)
         original_pool = self._pool
+        if extra_ca_file is not None:
+            original_pool._ssl_context.load_verify_locations(cafile=extra_ca_file)
         # HTTPTransport ne permet pas d'injecter un backend. Conserver son contexte
         # vérifié et ses limites ; cet accès privé est couvert par les tests TLS.
         self._pool = httpcore.ConnectionPool(
@@ -149,7 +173,7 @@ class _GuardedTransport(httpx.HTTPTransport):
             http1=True,
             http2=False,
             retries=0,
-            network_backend=GuardedNetworkBackend(network_backend),
+            network_backend=GuardedNetworkBackend(network_backend, allowed_hosts=allowed_hosts),
         )
         original_pool.close()
 
@@ -160,20 +184,49 @@ class _GuardedTransport(httpx.HTTPTransport):
         return super().handle_request(request)
 
 
+class _SafeClient(httpx.Client):
+    def __init__(
+        self,
+        timeout: float,
+        *,
+        network_backend: httpcore.NetworkBackend | None,
+        allowed_hosts: Iterable[str],
+        extra_ca_file: str | Path | None,
+    ) -> None:
+        self.allowed_hosts = frozenset(allowed_hosts)
+        super().__init__(
+            transport=_GuardedTransport(
+                network_backend, allowed_hosts=self.allowed_hosts, extra_ca_file=extra_ca_file
+            ),
+            timeout=timeout,
+            follow_redirects=False,
+            trust_env=False,
+        )
+
+
 def _create_safe_client(
-    timeout: float = 10.0, *, network_backend: httpcore.NetworkBackend | None = None
+    timeout: float = 10.0,
+    *,
+    network_backend: httpcore.NetworkBackend | None = None,
+    allowed_hosts: Iterable[str] = (),
+    extra_ca_file: str | Path | None = None,
 ) -> httpx.Client:
-    return httpx.Client(
-        transport=_GuardedTransport(network_backend),
-        timeout=timeout,
-        follow_redirects=False,
-        trust_env=False,
+    return _SafeClient(
+        timeout,
+        network_backend=network_backend,
+        allowed_hosts=allowed_hosts,
+        extra_ca_file=extra_ca_file,
     )
 
 
-def create_safe_client(timeout: float = 10.0) -> httpx.Client:
+def create_safe_client(
+    timeout: float = 10.0,
+    *,
+    allowed_hosts: Iterable[str] = (),
+    extra_ca_file: str | Path | None = None,
+) -> httpx.Client:
     """Seule fabrique de clients HTTP autorisée pour contacter une cible."""
-    return _create_safe_client(timeout)
+    return _create_safe_client(timeout, allowed_hosts=allowed_hosts, extra_ca_file=extra_ca_file)
 
 
 def safe_get(client: httpx.Client, url: str, max_redirects: int = 5) -> httpx.Response:
@@ -181,7 +234,9 @@ def safe_get(client: httpx.Client, url: str, max_redirects: int = 5) -> httpx.Re
         raise SsrfBlockedError("Redirect limit must not be negative")
     redirects = 0
     while True:
-        check_url(url)
+        check_url(
+            url, allowed_hosts=client.allowed_hosts if isinstance(client, _SafeClient) else ()
+        )
         response = client.get(url, follow_redirects=False)
         location = response.headers.get("location")
         if response.status_code not in {301, 302, 303, 307, 308} or location is None:
