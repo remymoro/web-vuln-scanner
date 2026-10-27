@@ -12,3 +12,34 @@ class FakeTxtResolver:
         if self.error is not None:
             raise self.error
         return self.records
+
+
+class FakeScanQueue:
+    def __init__(self, error=None):
+        self.scan_ids = []
+        self.error = error
+
+    def enqueue(self, scan_id):
+        self.scan_ids.append(scan_id)
+        if self.error is not None:
+            raise self.error
+
+
+class FakeScanner:
+    name = "fake"
+
+    def __init__(self, findings=(), error=None, delay=0):
+        self.findings = list(findings)
+        self.error = error
+        self.delay = delay
+        self.targets = []
+
+    def run(self, target):
+        import time
+
+        self.targets.append(target)
+        if self.delay:
+            time.sleep(self.delay)
+        if self.error is not None:
+            raise self.error
+        return self.findings
