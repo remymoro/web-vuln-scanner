@@ -18,6 +18,8 @@ def env(monkeypatch, tmp_path):
         "ACCESS_TOKEN_MINUTES",
         "REDIS_URL",
         "SCAN_TIMEOUT_SECONDS",
+        "SCAN_PENDING_TIMEOUT_SECONDS",
+        "SCAN_COOLDOWN_SECONDS",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("REDIS_URL", "redis://localhost:6380/0")
