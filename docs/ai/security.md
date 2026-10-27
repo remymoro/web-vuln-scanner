@@ -35,6 +35,35 @@ Ces outils ne peuvent pas utiliser `create_safe_client()`. Appeler `check_url()`
 - s'exécuter dans le réseau isolé décrit plus bas, qui bloque les plages privées même si l'outil se trompe ;
 - pour ZAP en plus : limiter l'exploration au domaine vérifié et n'utiliser que le scan passif.
 
+### Exceptions de démonstration (développement uniquement)
+
+`APP_ENV` vaut `production` par défaut (`development`, `test`, `production` acceptés).
+La configuration refuse de démarrer avec `DEV_SSRF_ALLOWED_HOSTS` non vide ou
+`DEV_EXTRA_CA_FILE` renseigné si `APP_ENV` n'est pas `development`. Le worker
+valide les réglages avant de lancer RQ et sa fabrique ne transmet ces exceptions
+qu'en développement. Aucune exception n'est activée par défaut.
+
+- `DEV_SSRF_ALLOWED_HOSTS` est une liste JSON de noms exacts en minuscules ASCII,
+  sans joker, URL ni point final. Pour ces seuls noms, la garde autorise les plages
+  RFC 1918 et `fc00::/7`. Loopback, link-local (dont `169.254.169.254`), multicast,
+  adresses réservées, non spécifiées et autres plages non publiques restent bloqués,
+  ainsi que les IPv4 privées encapsulées en IPv6. Toute réponse DNS contenant une
+  adresse interdite fait échouer la destination entière. La liste s'applique à
+  chaque contrôle de `safe_get` et à chaque connexion TCP : une redirection vers
+  un autre nom privé reste bloquée, comme le rebinding vers une adresse interdite.
+- `DEV_EXTRA_CA_FILE` ajoute la CA locale au contexte TLS existant : autorités
+  habituelles conservées, certificat et nom vérifiés, SNI d'origine conservé,
+  aucun proxy ni réglage TLS lu dans l'environnement. Le worker ne reçoit que
+  le certificat public de CA ; les clés restent dans les volumes du générateur
+  et du serveur de démonstration.
+- Le résolveur TXT de la démo est CoreDNS dans un réseau interne, sans DNS public.
+  `DNS_NAMESERVERS` (liste JSON d'IP ou absent) choisit les résolveurs dnspython ;
+  c'est un réglage DNS autorisé dans tous les environnements, pas une exception
+  anti-SSRF. Il ne change pas la résolution à la connexion du client HTTP.
+
+La preuve de propriété reste obligatoire. Aucun outil externe ne bénéficie de
+ces exceptions : il devra respecter les règles d'épinglage et d'isolation ci-dessus.
+
 ## Limites
 
 - `feat/queue-workers` : un seul scan actif par cible (verrou en base) et délai maximum par scan (le scan passe à `failed` au-delà).
@@ -45,3 +74,11 @@ Ces outils ne peuvent pas utiliser `create_safe_client()`. Appeler `check_url()`
 - Les workers accèdent à PostgreSQL (états, constats, notes) et à Redis (file), jamais à l'API.
 - Le trafic vers les cibles (workers vers Internet, conteneur ZAP) sort par un réseau qui bloque les plages privées et réservées.
 - ZAP n'a accès ni à PostgreSQL, ni à Redis, ni à l'API : seuls les workers le pilotent.
+
+Le Compose de démo sépare API et worker sur deux réseaux de données internes,
+avec PostgreSQL et Redis sur les deux. Un réseau interne supplémentaire relie
+uniquement worker et site de démo ; un autre relie uniquement API et CoreDNS.
+Seule l'API publie un port, sur la boucle locale de l'hôte, via le seul réseau non
+interne (`edge`), qu'elle ne partage avec aucun autre service. Le worker n'a aucun
+accès à Internet. Le filtrage de sortie des futurs outils externes reste
+à implémenter avant leur activation.
