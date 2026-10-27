@@ -1,3 +1,4 @@
+import base64
 import uuid
 
 import pytest
@@ -77,7 +78,11 @@ def test_wrong_password_and_unknown_email_get_the_same_answer(client):
     [
         pytest.param({}, id="no-header"),
         pytest.param({"Authorization": "Bearer not.a.jwt"}, id="bad-token"),
-        pytest.param({"Authorization": "Basic cmVteTpzZWNyZXQ="}, id="wrong-scheme"),
+        # Construit à l'exécution : un en-tête Basic écrit en dur ressemble à un vrai secret.
+        pytest.param(
+            {"Authorization": "Basic " + base64.b64encode(b"user:pass").decode()},
+            id="wrong-scheme",
+        ),
     ],
 )
 def test_me_requires_a_valid_token(client, headers):
