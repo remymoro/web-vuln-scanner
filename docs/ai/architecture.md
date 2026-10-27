@@ -10,7 +10,7 @@
 | Workers | Exécutent les scanners, calculent la note, enregistrent le résultat | Python |
 | Base de données | Utilisateurs, cibles, scans, constats | PostgreSQL |
 
-ZAP tourne en plus dans son propre conteneur, piloté par les workers via son API.
+ZAP tourne en plus dans son propre conteneur, piloté par les workers via son API (branche `feat/scanner-zap`, réseau isolé : voir `security.md`).
 
 ## Parcours d'un scan
 
@@ -39,11 +39,11 @@ ZAP tourne en plus dans son propre conteneur, piloté par les workers via son AP
 
 ## Modèle de données
 
-- `users` : id, email, mot de passe haché.
+- `users` : id, email, mot de passe haché, créé le.
 - `targets` : id, user_id, domaine, jeton de vérification, créée le, vérifiée le ;
   unicité (user_id, domaine), suppression en cascade avec le compte.
 - `scans` : id, target_id, état (pending, running, done, failed), créé le, terminé le, note globale.
-- `findings` : id, scan_id, scanner, catégorie, sévérité, titre, preuve, recommandation.
+- `findings` : id, scan_id, scanner, catégorie, sévérité, titre, description, preuve, recommandation.
 
 Redis ne sert pas de stockage : il transporte les jobs, et éventuellement un cache court.
 
@@ -58,9 +58,10 @@ app/
   scanners/     un module par scanner + registre
   security/     garde anti-SSRF, vérification DNS
   infra/        modèles SQLAlchemy, repositories PostgreSQL, hachage argon2,
-                client Redis, client ZAP
-migrations/     migrations Alembic
+                chargeurs de configuration YAML, client Redis, client ZAP
   workers/      point d'entrée des jobs
+config/         barème de notation et règles des scanners (YAML)
+migrations/     migrations Alembic
 tests/
 ```
 
@@ -79,5 +80,5 @@ la dépendance `SessionDep` valide avant l'envoi de la réponse ou annule en cas
 
 - Tests unitaires sur la notation et chaque scanner (réponses HTTP simulées).
 - Tests dédiés à la garde anti-SSRF : IP privées, redirections, rebinding.
-- Logs structurés et exceptions métier dédiées.
-- CI GitHub Actions : lint, tests, build des images.
+- Exceptions métier dédiées. Plus tard : logs structurés.
+- CI GitHub Actions : `uv sync --locked`, ruff (lint et format) et pytest avec un PostgreSQL de service. Aucune image n'est construite pour l'instant.

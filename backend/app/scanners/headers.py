@@ -110,7 +110,7 @@ def analyze_headers(headers: httpx.Headers, rules: Sequence[HeaderRule]) -> list
 
 
 class HeadersScanner:
-    """Utilise le client injecté, fourni à terme par la garde anti-SSRF ; n'en crée jamais."""
+    """Utilise le client injecté, créé par create_safe_client() ; n'en crée jamais."""
 
     name = "headers"
 

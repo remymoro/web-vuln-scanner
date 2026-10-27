@@ -6,16 +6,16 @@ Document d'architecture source : https://claude.ai/artifact/GP1hjHSp4fKNqjSTHDnx
 ## Règles de travail
 
 - Projet d'apprentissage : avant chaque changement, expliquer en français ce qui va être fait et pourquoi, nommer le pattern utilisé, puis attendre la validation de Rémy.
-- Une branche par ligne du planning ; ne jamais committer sur `main`.
+- Une branche courte par fonctionnalité, dans l'ordre du planning (une ligne peut en regrouper plusieurs) ; ne jamais committer sur `main`.
 - Petits commits au format Conventional Commits (`feat:`, `fix:`, `test:`, `chore:`, `docs:`).
 - Écrire les tests avant ou avec le code ; une branche n'est terminée que si pytest et le lint passent.
 - Ne pas ajouter de dépendance hors de la stack décidée sans le demander.
 - Le dossier `domain/` n'importe jamais FastAPI, SQLAlchemy, Redis ni requests.
-- Toute requête sortante vers un site cible passe par la garde anti-SSRF (`security/`) (client créé uniquement via `create_safe_client()`).
+- Toute requête HTTP vers un site cible passe par un client créé via `create_safe_client()` (`security/`). Un outil qui ouvre ses propres connexions (sslyze, wafw00f, ZAP) suit les règles de `docs/ai/security.md` : IP validée et réseau isolé.
 
 ## Stack décidée
 
-Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2 + Alembic, PostgreSQL, Redis + RQ, httpx, sslyze, wafw00f, pytest, ruff, Angular, Docker Compose, k3s, KEDA.
+Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2 + Alembic, PostgreSQL, Redis + RQ, httpx, sslyze, wafw00f, ZAP (conteneur, scan passif), pytest, ruff, Angular, Docker Compose, k3s, KEDA.
 
 ## Stratégie Git
 
@@ -27,7 +27,7 @@ Ne lire que le fichier utile à la branche en cours.
 
 | Fichier | Contenu | À lire pour |
 | --- | --- | --- |
-| `docs/ai/roadmap.md` | Planning des 13 branches, critères de fin, dépendances autorisées par branche | Toute nouvelle branche (commencer par là) |
+| `docs/ai/roadmap.md` | Planning (13 lignes, certaines regroupent plusieurs branches), critères de fin, dépendances autorisées par branche | Toute nouvelle branche (commencer par là) |
 | `docs/ai/architecture.md` | Briques, parcours d'un scan, API, modèle de données, arborescence du code | `chore/init`, `feat/api-base`, `feat/targets-dns`, `feat/queue-workers` |
 | `docs/ai/domain.md` | `Finding`, `Severity`, contrat `Scanner`, scanners prévus, notation | `feat/domain-*`, `feat/scanner-*` |
 | `docs/ai/security.md` | Preuve de propriété, anti-SSRF, limites, isolation réseau | `feat/security-ssrf`, `feat/targets-dns`, tout scanner |
