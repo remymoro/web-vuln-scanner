@@ -228,6 +228,7 @@ name = "web-vuln-scanner"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "httpcore" },
     { name = "httpx" },
     { name = "pyyaml" },
 ]
@@ -241,6 +242,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "httpcore", specifier = ">=1.0.9" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "pyyaml", specifier = ">=6.0.3" },
 ]

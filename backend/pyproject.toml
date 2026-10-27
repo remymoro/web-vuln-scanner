@@ -3,6 +3,7 @@ name = "web-vuln-scanner"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+    "httpcore>=1.0.9",
     "httpx>=0.28.1",
     "pyyaml>=6.0.3",
 ]

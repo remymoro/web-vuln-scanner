@@ -11,7 +11,7 @@ Document d'architecture source : https://claude.ai/artifact/GP1hjHSp4fKNqjSTHDnx
 - Écrire les tests avant ou avec le code ; une branche n'est terminée que si pytest et le lint passent.
 - Ne pas ajouter de dépendance hors de la stack décidée sans le demander.
 - Le dossier `domain/` n'importe jamais FastAPI, SQLAlchemy, Redis ni requests.
-- Toute requête sortante vers un site cible passe par la garde anti-SSRF (`security/`).
+- Toute requête sortante vers un site cible passe par la garde anti-SSRF (`security/`) (client créé uniquement via `create_safe_client()`).
 
 ## Stack décidée
 
