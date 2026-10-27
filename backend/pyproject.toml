@@ -2,7 +2,9 @@
 name = "web-vuln-scanner"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pyyaml>=6.0.3",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

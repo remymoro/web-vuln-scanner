@@ -1,0 +1,12 @@
+penalties:
+  high: 25
+  medium: 10
+  low: 3
+  info: 0
+
+thresholds:
+  - {grade: A, min: 90}
+  - {grade: B, min: 75}
+  - {grade: C, min: 60}
+  - {grade: D, min: 40}
+  - {grade: E, min: 0}
