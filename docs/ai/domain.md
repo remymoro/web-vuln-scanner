@@ -19,9 +19,9 @@ Un `Finding` est un constat : une chose précise observée sur le site. Tous les
 
 ```python
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
-class Severity(str, Enum):
+class Severity(StrEnum):
     INFO = "info"
     LOW = "low"
     MEDIUM = "medium"

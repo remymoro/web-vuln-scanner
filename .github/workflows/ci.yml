@@ -29,5 +29,4 @@ jobs:
       - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      # Tolérance du code 5 (aucun test collecté) à retirer dans la branche feat/domain-finding.
-      - run: uv run pytest || [ $? -eq 5 ]
+      - run: uv run pytest
