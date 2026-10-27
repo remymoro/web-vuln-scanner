@@ -24,13 +24,29 @@ docs/ai/        Architecture et feuille de route
 
 ## Tests et lint
 
-Prérequis : Python 3.12 ou supérieur et `uv`.
+Prérequis : Python 3.12 ou supérieur, `uv` et Docker (pour la base de test).
 
 ```sh
+# Base PostgreSQL jetable sur le port 5433 (données en mémoire)
+docker compose -f docker-compose.test.yml up -d --wait
+
 cd backend
 uv sync
 uv run pytest
 uv run ruff check .
+uv run ruff format --check .
 ```
 
-À ce stade, aucun test n'existe : pytest affiche `no tests ran` (code de sortie 5).
+Les tests qui touchent la base échouent avec un message explicite si elle n'est pas lancée.
+Arrêter la base : `docker compose -f docker-compose.test.yml down`.
+
+## Lancer l'API en local
+
+```sh
+cd backend
+cp .env.example .env          # puis remplacer JWT_SECRET
+uv run alembic upgrade head   # crée les tables dans la base de DATABASE_URL
+uv run uvicorn app.api.main:create_app --factory --reload
+```
+
+Documentation interactive : http://127.0.0.1:8000/docs
