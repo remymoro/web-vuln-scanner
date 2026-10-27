@@ -50,6 +50,21 @@ def test_duplicate_email_raises_domain_error_and_keeps_session_usable(repository
     ]
 
 
+def test_update_password_hash(repository):
+    user = User.create("remy@example.test", "old")
+    other = User.create("other@example.test", "keep")
+    repository.add(user)
+    repository.add(other)
+    repository.update_password_hash(user.id, "new")
+    assert repository.get_by_id(user.id).password_hash == "new"
+    assert repository.get_by_id(other.id).password_hash == "keep"
+
+
+def test_update_password_hash_rejects_empty_hash(repository):
+    with pytest.raises(ValueError):
+        repository.update_password_hash(uuid.uuid4(), "")
+
+
 def test_repository_never_commits(repository, db_session):
     repository.add(User.create("remy@example.test", "hash"))
     assert db_session.in_transaction()

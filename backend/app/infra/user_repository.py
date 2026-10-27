@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -47,3 +47,10 @@ class SqlAlchemyUserRepository:
             return None
         model = self._session.scalar(select(UserModel).where(UserModel.email == normalized))
         return None if model is None else _to_domain(model)
+
+    def update_password_hash(self, user_id: uuid.UUID, password_hash: str) -> None:
+        if not password_hash:
+            raise ValueError("password_hash must not be empty")
+        self._session.execute(
+            update(UserModel).where(UserModel.id == user_id).values(password_hash=password_hash)
+        )

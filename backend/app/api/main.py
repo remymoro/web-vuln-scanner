@@ -5,12 +5,16 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import health
+from app.api import auth, health
 from app.config import Settings, get_settings
+from app.domain.auth import PasswordHasher
 from app.infra.db import create_db_engine, create_session_factory
+from app.infra.passwords import Argon2PasswordHasher
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None, password_hasher: PasswordHasher | None = None
+) -> FastAPI:
     settings = settings if settings is not None else get_settings()
 
     @asynccontextmanager
@@ -24,5 +28,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="web-vuln-scanner", lifespan=lifespan)
     app.state.settings = settings
+    app.state.password_hasher = password_hasher or Argon2PasswordHasher()
     app.include_router(health.router)
+    app.include_router(auth.router)
     return app
