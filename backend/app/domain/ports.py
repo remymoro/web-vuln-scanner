@@ -1,9 +1,13 @@
 """Ports : ce dont le domaine a besoin, sans dire comment c'est fait."""
 
 import uuid
+from collections.abc import Iterable
 from datetime import datetime
 from typing import Protocol
 
+from app.domain.finding import Finding
+from app.domain.scans import Scan
+from app.domain.target import Target
 from app.domain.targets import RegisteredTarget
 from app.domain.user import User
 
@@ -35,4 +39,32 @@ class TargetRepository(Protocol):
 class TxtRecordResolver(Protocol):
     def txt_records(self, name: str) -> list[str]:
         """TXT du nom exact ; [] si absent, DnsLookupError si le DNS est injoignable."""
+        ...
+
+
+class Scanner(Protocol):
+    name: str
+
+    def run(self, target: Target) -> list[Finding]: ...
+
+
+class ScanRepository(Protocol):
+    def add(self, scan: Scan) -> None: ...
+
+    def get(self, scan_id: uuid.UUID) -> Scan | None: ...
+
+    def get_active_for_target(self, target_id: uuid.UUID) -> Scan | None: ...
+
+    def list_for_target_since(self, target_id: uuid.UUID, since: datetime) -> list[Scan]: ...
+
+    def save(self, scan: Scan) -> None: ...
+
+    def replace_findings(self, scan_id: uuid.UUID, findings: Iterable[Finding]) -> None: ...
+
+    def get_findings(self, scan_id: uuid.UUID) -> list[Finding]: ...
+
+
+class ScanQueue(Protocol):
+    def enqueue(self, scan_id: uuid.UUID) -> None:
+        """Enfile le scan ; lève QueueUnavailableError si la file est injoignable."""
         ...

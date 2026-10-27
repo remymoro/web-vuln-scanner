@@ -25,6 +25,7 @@ def test_health(client):
 def test_health_reports_unavailable_database(migrated_engine):
     settings = Settings(
         _env_file=None,
+        redis_url="redis://localhost:6380/0",
         database_url="postgresql+psycopg://scanner:scanner@127.0.0.1:1/none",
         jwt_secret="t" * 32,
     )

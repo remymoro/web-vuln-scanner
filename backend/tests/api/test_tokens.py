@@ -14,6 +14,7 @@ SECRET = "t" * 32
 def settings() -> Settings:
     return Settings(
         _env_file=None,
+        redis_url="redis://localhost:6380/0",
         database_url="postgresql+psycopg://x:y@localhost/z",
         jwt_secret=SECRET,
         access_token_minutes=15,
