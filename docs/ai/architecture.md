@@ -26,7 +26,9 @@ ZAP tourne en plus dans son propre conteneur, piloté par les workers via son AP
 
 | Méthode | Route | Rôle |
 | --- | --- | --- |
-| POST | `/auth/register`, `/auth/login` | Compte et JWT |
+| POST | `/auth/register`, `/auth/login` | Compte et JWT (login en JSON) |
+| GET | `/auth/me` | Utilisateur du jeton |
+| GET | `/health` | État de l'API et de la base (sondes) |
 | POST | `/targets` | Déclarer un site, recevoir le jeton DNS |
 | POST | `/targets/{id}/verify` | Vérifier la propriété |
 | POST | `/scans` | Lancer un scan (202 Accepted) |
@@ -46,16 +48,23 @@ Redis ne sert pas de stockage : il transporte les jobs, et éventuellement un ca
 
 ```
 app/
-  api/          routes FastAPI, schémas Pydantic
-  domain/       entités (Target, Scan, Finding), règles métier, notation
+  config.py     réglages lus depuis l'environnement (pydantic-settings)
+  api/          fabrique create_app, routes FastAPI, schémas Pydantic, JWT
+  domain/       entités (User, Target, Scan, Finding), règles métier, notation,
+                ports.py (interfaces des repositories)
   scanners/     un module par scanner + registre
   security/     garde anti-SSRF, vérification DNS
-  infra/        repositories PostgreSQL, client Redis, client ZAP
+  infra/        modèles SQLAlchemy, repositories PostgreSQL, hachage argon2,
+                client Redis, client ZAP
+migrations/     migrations Alembic
   workers/      point d'entrée des jobs
 tests/
 ```
 
 Le domaine ne dépend ni de FastAPI ni de PostgreSQL : c'est ce qui le rend testable.
+Il déclare ses besoins sous forme de ports (`Protocol`) ; `infra/` fournit les adaptateurs.
+Une requête HTTP correspond à une transaction : le repository ne fait jamais `commit`,
+la dépendance `SessionDep` valide avant l'envoi de la réponse ou annule en cas d'erreur.
 
 ## Qualité
 
