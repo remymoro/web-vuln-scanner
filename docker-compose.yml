@@ -1,0 +1,179 @@
+name: web-vuln-scanner
+
+# Une seule image pour migrate, api et worker : seul migrate la construit,
+# sinon trois constructions parallèles se disputent le même nom d'image.
+x-backend: &backend
+  image: web-vuln-scanner-backend:0.1.0
+  pull_policy: never
+  environment: &backend-environment
+    APP_ENV: development
+    DATABASE_URL: postgresql+psycopg://scanner:${POSTGRES_PASSWORD:?Renseigner POSTGRES_PASSWORD dans .env}@postgres:5432/scanner
+    REDIS_URL: redis://redis:6379/0
+    JWT_SECRET: ${JWT_SECRET:?Renseigner JWT_SECRET dans .env}
+
+services:
+  postgres:
+    image: postgres:17.6-alpine3.22
+    environment:
+      POSTGRES_USER: scanner
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Renseigner POSTGRES_PASSWORD dans .env}
+      POSTGRES_DB: scanner
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [api-data, worker-data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U scanner -d scanner"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7.4.6-alpine3.21
+    command: [redis-server, --appendonly, "yes"]
+    volumes:
+      - redis-data:/data
+    networks: [api-data, worker-data]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    <<: *backend
+    build:
+      context: ./backend
+    pull_policy: build
+    command: [alembic, upgrade, head]
+    networks: [api-data]
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *backend
+    environment:
+      <<: *backend-environment
+      DNS_NAMESERVERS: '["172.30.53.53"]'
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks: [edge, api-data, dns]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      demo-dns:
+        condition: service_healthy
+
+  worker:
+    <<: *backend
+    environment:
+      <<: *backend-environment
+      DEV_SSRF_ALLOWED_HOSTS: '["demo.scanner.test"]'
+      DEV_EXTRA_CA_FILE: /trust/ca.crt
+    command:
+      - /bin/sh
+      - -ec
+      - >-
+        python -c 'from app.config import get_settings; get_settings()';
+        exec rq worker scans --with-scheduler --url "$$REDIS_URL"
+    volumes:
+      - demo-trust:/trust:ro
+    networks: [worker-data, targets]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import os, socket, sys;
+          from redis import Redis;
+          from rq import Worker;
+          from datetime import datetime, timezone;
+          workers = Worker.all(connection=Redis.from_url(os.environ['REDIS_URL']));
+          sys.exit(not any(w.hostname == socket.gethostname() and w.last_heartbeat is not None
+          and (datetime.now(timezone.utc) - w.last_heartbeat).total_seconds() < w.worker_ttl + 60
+          for w in workers))
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      demo-ca:
+        condition: service_completed_successfully
+      demo-site:
+        condition: service_healthy
+
+  demo-ca:
+    image: alpine/openssl:3.5.4
+    entrypoint: [/bin/sh, /demo/generate-certs.sh]
+    volumes:
+      - ./deploy/demo/generate-certs.sh:/demo/generate-certs.sh:ro
+      - demo-authority:/authority
+      - demo-tls:/tls
+      - demo-trust:/trust
+    network_mode: none
+
+  demo-site:
+    image: nginx:1.28.0-alpine3.21
+    volumes:
+      - ./deploy/demo/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/demo/index.html:/usr/share/nginx/html/index.html:ro
+      - demo-tls:/tls:ro
+    networks:
+      targets:
+        aliases: [demo.scanner.test]
+    healthcheck:
+      test: [CMD-SHELL, "nc -z 127.0.0.1 443"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      demo-ca:
+        condition: service_completed_successfully
+
+  demo-dns:
+    image: web-vuln-scanner-dns:0.1.0
+    build:
+      context: ./deploy/demo
+      dockerfile: Dockerfile.dns
+    volumes:
+      - demo-zone:/zones
+    networks:
+      dns:
+        ipv4_address: 172.30.53.53
+    healthcheck:
+      test: [CMD-SHELL, "wget -q -O /dev/null http://127.0.0.1:8080/health && nslookup -type=SOA scanner.test 127.0.0.1 >/dev/null"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+networks:
+  # Seul réseau non interne : Docker ne publie un port que si le conteneur y est relié.
+  edge: {}
+  api-data:
+    internal: true
+  worker-data:
+    internal: true
+  targets:
+    internal: true
+  dns:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.53.0/24
+
+volumes:
+  postgres-data:
+  redis-data:
+  demo-authority:
+  demo-tls:
+  demo-trust:
+  demo-zone:

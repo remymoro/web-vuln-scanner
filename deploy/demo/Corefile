@@ -1,0 +1,7 @@
+scanner.test:53 {
+    errors
+    health :8080
+    file /zones/scanner.test.zone scanner.test {
+        reload 2s
+    }
+}
