@@ -6,13 +6,20 @@ from sqlalchemy import text
 from app.api.main import create_app
 from app.config import Settings
 from app.infra.passwords import Argon2PasswordHasher
-from tests.conftest import TEST_DATABASE_URL
+from tests.conftest import TEST_DATABASE_URL, TEST_REDIS_URL
 from tests.fakes import FakeTxtResolver
 
 
 @pytest.fixture
 def settings() -> Settings:
-    return Settings(_env_file=None, database_url=TEST_DATABASE_URL, jwt_secret="t" * 32)
+    return Settings(
+        _env_file=None,
+        database_url=TEST_DATABASE_URL,
+        redis_url=TEST_REDIS_URL,
+        jwt_secret="t" * 32,
+        # Délai entre deux scans désactivé ici ; testé à part dans test_scans.py.
+        scan_cooldown_seconds=0,
+    )
 
 
 @pytest.fixture

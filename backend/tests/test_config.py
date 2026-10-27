@@ -11,8 +11,16 @@ SECRET = "s" * 32
 def env(monkeypatch, tmp_path):
     # Isoler du .env et de l'environnement du poste de développement.
     monkeypatch.chdir(tmp_path)
-    for name in ("DATABASE_URL", "JWT_SECRET", "JWT_ALGORITHM", "ACCESS_TOKEN_MINUTES"):
+    for name in (
+        "DATABASE_URL",
+        "JWT_SECRET",
+        "JWT_ALGORITHM",
+        "ACCESS_TOKEN_MINUTES",
+        "REDIS_URL",
+        "SCAN_TIMEOUT_SECONDS",
+    ):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6380/0")
     monkeypatch.setenv("DATABASE_URL", DATABASE_URL)
     monkeypatch.setenv("JWT_SECRET", SECRET)
     return monkeypatch
@@ -24,6 +32,10 @@ def test_reads_environment_with_defaults(env):
     assert settings.jwt_secret.get_secret_value() == SECRET
     assert settings.jwt_algorithm == "HS256"
     assert settings.access_token_minutes == 30
+    assert settings.redis_url == "redis://localhost:6380/0"
+    assert settings.scan_timeout_seconds == 300
+    assert settings.scan_pending_timeout_seconds == 3600
+    assert settings.scan_cooldown_seconds == 600
 
 
 def test_secret_is_hidden_in_repr(env):
@@ -39,6 +51,10 @@ def test_reads_dotenv_file(env, tmp_path):
 @pytest.mark.parametrize(
     ("name", "value"),
     [
+        ("REDIS_URL", "http://localhost:6380"),
+        ("REDIS_URL", "redis://"),
+        ("SCAN_TIMEOUT_SECONDS", "0"),
+        ("SCAN_TIMEOUT_SECONDS", "3601"),
         ("JWT_SECRET", "too-short"),
         ("DATABASE_URL", "sqlite:///scanner.db"),
         ("JWT_ALGORITHM", "none"),
@@ -52,7 +68,7 @@ def test_invalid_values_are_rejected(env, name, value):
         Settings()
 
 
-@pytest.mark.parametrize("name", ["DATABASE_URL", "JWT_SECRET"])
+@pytest.mark.parametrize("name", ["DATABASE_URL", "JWT_SECRET", "REDIS_URL"])
 def test_required_values(env, name):
     env.delenv(name)
     with pytest.raises(ValidationError):
@@ -65,3 +81,8 @@ def test_get_settings_is_cached(env):
         assert get_settings() is get_settings()
     finally:
         get_settings.cache_clear()
+
+
+def test_accepts_secure_redis(env):
+    env.setenv("REDIS_URL", "rediss://redis.example.test:6380/0")
+    assert Settings().redis_url.startswith("rediss://")
