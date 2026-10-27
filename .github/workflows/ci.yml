@@ -19,6 +19,21 @@ jobs:
       run:
         working-directory: backend
     timeout-minutes: 10
+    # Même base que docker-compose.test.yml, pour les tests qui touchent PostgreSQL.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: scanner
+          POSTGRES_PASSWORD: scanner
+          POSTGRES_DB: scanner_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U scanner -d scanner_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@v10.2.0
