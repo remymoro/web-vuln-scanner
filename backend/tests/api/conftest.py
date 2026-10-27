@@ -7,6 +7,7 @@ from app.api.main import create_app
 from app.config import Settings
 from app.infra.passwords import Argon2PasswordHasher
 from tests.conftest import TEST_DATABASE_URL
+from tests.fakes import FakeTxtResolver
 
 
 @pytest.fixture
@@ -15,10 +16,15 @@ def settings() -> Settings:
 
 
 @pytest.fixture
-def app(settings, migrated_engine):
+def txt_resolver():
+    return FakeTxtResolver()
+
+
+@pytest.fixture
+def app(settings, migrated_engine, txt_resolver):
     # argon2 au minimum : mêmes chemins de code, tests rapides.
     hasher = Argon2PasswordHasher(Argon2(time_cost=1, memory_cost=8, parallelism=1))
-    return create_app(settings, password_hasher=hasher)
+    return create_app(settings, password_hasher=hasher, txt_resolver=txt_resolver)
 
 
 @pytest.fixture
@@ -27,4 +33,4 @@ def client(app, migrated_engine):
     with TestClient(app, raise_server_exceptions=False) as test_client:
         yield test_client
     with migrated_engine.begin() as connection:
-        connection.execute(text("TRUNCATE users"))
+        connection.execute(text("TRUNCATE targets, users"))
