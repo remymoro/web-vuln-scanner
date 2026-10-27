@@ -1,9 +1,11 @@
 # Base PostgreSQL et Redis jetables pour les tests locaux :
 #   docker compose -f docker-compose.test.yml up -d
 # Données en mémoire (tmpfs) : tout disparaît à l'arrêt du conteneur.
+name: web-vuln-scanner-test
+
 services:
   postgres-test:
-    image: postgres:17-alpine
+    image: postgres:17.6-alpine3.22
     environment:
       POSTGRES_USER: scanner
       POSTGRES_PASSWORD: scanner
@@ -19,7 +21,7 @@ services:
       retries: 15
 
   redis-test:
-    image: redis:7-alpine
+    image: redis:7.4.6-alpine3.21
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     ports:
       - "127.0.0.1:6380:6379"

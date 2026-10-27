@@ -22,7 +22,7 @@ jobs:
     # Même base que docker-compose.test.yml, pour les tests qui touchent PostgreSQL.
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:17.6-alpine3.22
         env:
           POSTGRES_USER: scanner
           POSTGRES_PASSWORD: scanner
@@ -35,7 +35,7 @@ jobs:
           --health-timeout 3s
           --health-retries 15
       redis:
-        image: redis:7-alpine
+        image: redis:7.4.6-alpine3.21
         ports:
           - 6380:6379
         options: >-
@@ -54,3 +54,10 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: docker build --tag web-vuln-scanner-backend:ci ./backend
