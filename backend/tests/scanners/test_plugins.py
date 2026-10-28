@@ -126,10 +126,61 @@ def test_builtin_options_are_validated(monkeypatch, tmp_path, options):
 
 def test_context_is_frozen_and_options_are_copied(tmp_path):
     options = {"limit": 3}
-    context = ScannerContext(Mock(), tmp_path, options)
+    hosts = {"demo.scanner.test"}
+    ca = tmp_path / "ca.crt"
+    context = ScannerContext(Mock(), tmp_path, options, hosts, ca)
     options["limit"] = 8
+    hosts.clear()
     assert context.options == {"limit": 3}
+    assert context.allowed_hosts == frozenset({"demo.scanner.test"})
+    assert context.extra_ca_file == ca
     with pytest.raises(FrozenInstanceError):
         context.config_dir = Path("elsewhere")
     with pytest.raises(TypeError):
         context.options["limit"] = 8
+    with pytest.raises(FrozenInstanceError):
+        context.allowed_hosts = frozenset()
+    with pytest.raises(FrozenInstanceError):
+        context.extra_ca_file = None
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"unknown": True},
+        {"rules": ""},
+        {"rules": 5},
+        {"network_timeout": True},
+        {"network_timeout": 0},
+        {"network_timeout": 11},
+        {"network_timeout": 1.5},
+        {"network_timeout": "3"},
+        {"network_max_retries": True},
+        {"network_max_retries": -1},
+        {"network_max_retries": 3},
+        {"network_max_retries": "0"},
+    ],
+)
+def test_tls_options_are_validated(monkeypatch, tmp_path, options):
+    discover(monkeypatch)
+    with pytest.raises(ValueError, match="tls"):
+        load_scanners([ScannerConfig("tls", options)], Mock(), tmp_path)
+
+
+def test_tls_factory_receives_network_options_and_rules(monkeypatch):
+    from app.scanners import sslyze_probe
+
+    discover(monkeypatch)
+    probe = Mock()
+    monkeypatch.setattr(sslyze_probe, "SslyzeProbe", probe)
+    config_dir = Path(__file__).resolve().parents[2] / "config"
+    ca = Path("/trust/ca.crt")
+    scanners = load_scanners(
+        [ScannerConfig("tls", {"network_timeout": 2, "network_max_retries": 1})],
+        Mock(),
+        config_dir,
+        allowed_hosts={"demo.scanner.test"},
+        extra_ca_file=ca,
+    )
+    assert [(scanner.name, scanner.category) for scanner in scanners] == [("tls", "TLS")]
+    probe.assert_called_once_with(network_timeout=2, network_max_retries=1, extra_ca_file=ca)

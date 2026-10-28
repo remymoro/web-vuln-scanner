@@ -1,4 +1,4 @@
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from importlib.metadata import entry_points
 from inspect import signature
@@ -10,8 +10,10 @@ import httpx
 from app.domain.ports import Scanner
 from app.infra.header_rules_config import load_header_rules
 from app.infra.scanners_config import ScannerConfig
+from app.infra.tls_rules_config import load_tls_rules
 from app.scanners.headers import HeadersScanner
 from app.scanners.registry import ScannerRegistry
+from app.scanners.tls import TlsScanner
 
 ENTRY_POINT_GROUP = "web_vuln_scanner.scanners"
 
@@ -21,9 +23,12 @@ class ScannerContext:
     client: httpx.Client
     config_dir: Path
     options: Mapping[str, object]
+    allowed_hosts: frozenset[str] = frozenset()
+    extra_ca_file: Path | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "options", MappingProxyType(dict(self.options)))
+        object.__setattr__(self, "allowed_hosts", frozenset(self.allowed_hosts))
 
 
 def _headers(context: ScannerContext) -> Scanner:
@@ -35,12 +40,46 @@ def _headers(context: ScannerContext) -> Scanner:
     return HeadersScanner(context.client, load_header_rules(context.config_dir / rules))
 
 
-BUILTIN_FACTORIES: dict[str, Callable[[ScannerContext], Scanner]] = {"headers": _headers}
+def _tls(context: ScannerContext) -> Scanner:
+    from app.scanners.sslyze_probe import SslyzeProbe
+
+    if context.options.keys() - {"rules", "network_timeout", "network_max_retries"}:
+        raise ValueError("Unknown tls option; expected rules, network_timeout, network_max_retries")
+    rules = context.options.get("rules", "tls_rules.yaml")
+    if not isinstance(rules, str) or not rules.strip():
+        raise ValueError("tls rules must be a non-empty path")
+    timeout = context.options.get("network_timeout", 3)
+    retries = context.options.get("network_max_retries", 0)
+    if type(timeout) is not int or not 1 <= timeout <= 10:
+        raise ValueError("tls network_timeout must be an integer between 1 and 10 seconds")
+    if type(retries) is not int or not 0 <= retries <= 2:
+        raise ValueError("tls network_max_retries must be an integer between 0 and 2")
+    return TlsScanner(
+        SslyzeProbe(
+            network_timeout=timeout,
+            network_max_retries=retries,
+            extra_ca_file=context.extra_ca_file,
+        ),
+        load_tls_rules(context.config_dir / rules),
+        allowed_hosts=context.allowed_hosts,
+    )
+
+
+BUILTIN_FACTORIES: dict[str, Callable[[ScannerContext], Scanner]] = {
+    "headers": _headers,
+    "tls": _tls,
+}
 
 
 def load_scanners(
-    configs: Sequence[ScannerConfig], client: httpx.Client, config_dir: Path
+    configs: Sequence[ScannerConfig],
+    client: httpx.Client,
+    config_dir: Path,
+    *,
+    allowed_hosts: Iterable[str] = (),
+    extra_ca_file: Path | None = None,
 ) -> tuple[Scanner, ...]:
+    allowed_hosts = frozenset(allowed_hosts)
     plugins = {}
     for entry_point in entry_points(group=ENTRY_POINT_GROUP):
         if entry_point.name in BUILTIN_FACTORIES or entry_point.name in plugins:
@@ -60,7 +99,9 @@ def load_scanners(
                 raise ValueError(f"Cannot load scanner factory: {config.name!r}") from exc
         if not callable(factory):
             raise ValueError(f"Scanner factory must be callable: {config.name!r}")
-        scanner = factory(ScannerContext(client, config_dir, config.options))
+        scanner = factory(
+            ScannerContext(client, config_dir, config.options, allowed_hosts, extra_ca_file)
+        )
         if (
             not isinstance(getattr(scanner, "name", None), str)
             or scanner.name != config.name

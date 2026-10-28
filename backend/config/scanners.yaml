@@ -2,3 +2,8 @@ scanners:
   - name: headers
     options:
       rules: header_rules.yaml
+  - name: tls
+    options:
+      rules: tls_rules.yaml
+      network_timeout: 3
+      network_max_retries: 0
