@@ -1,12 +1,18 @@
-import { Component, signal } from '@angular/core';
-import { RouterOutlet } from '@angular/router';
+import { Component, inject } from '@angular/core';
+import { Router, RouterLink, RouterOutlet } from '@angular/router';
+import { AuthService } from './core/auth-service';
 
 @Component({
-  imports: [RouterOutlet],
+  imports: [RouterOutlet, RouterLink],
   selector: 'app-root',
-  styleUrl: './app.css',
   templateUrl: './app.html',
 })
 export class App {
-  protected readonly title = signal('frontend');
+  readonly auth = inject(AuthService);
+  private readonly router = inject(Router);
+
+  logout() {
+    this.auth.logout();
+    void this.router.navigateByUrl('/login');
+  }
 }
