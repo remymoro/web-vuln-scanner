@@ -15,6 +15,8 @@ const scan = {
   score: null,
   grade: null,
   error: null,
+  partial: false,
+  scanners: [],
 };
 const finding = {
   id: 'rule',
@@ -45,6 +47,8 @@ it('affiche le rapport, ses catégories et les constats triés sans interpréter
   await Promise.resolve();
   TestBed.tick();
   http.expectOne('/api/scans/scan/report').flush({
+    partial: false,
+    scanners: [],
     score: 48,
     grade: 'D',
     deductions: [],
@@ -81,6 +85,70 @@ it('affiche le motif d’échec sans demander de rapport', async () => {
   http.expectNone('/api/scans/scan/report');
 });
 
+it('signale un rapport partiel et affiche les catégories non évaluées sans note', async () => {
+  const fixture = TestBed.createComponent(ScanPage);
+  fixture.detectChanges();
+  const http = TestBed.inject(HttpTestingController);
+  const scanners = [
+    { name: 'headers', category: 'en-têtes HTTP', status: 'ok', error: null, findings_count: 0 },
+    { name: 'tls', category: 'TLS', status: 'error', error: 'RuntimeError', findings_count: 0 },
+  ];
+  http.expectOne('/api/scans/scan').flush({ ...scan, status: 'done', partial: true, scanners });
+  await Promise.resolve();
+  TestBed.tick();
+  http.expectOne('/api/scans/scan/report').flush({
+    score: 100,
+    grade: 'A',
+    partial: true,
+    scanners,
+    categories: [
+      { category: 'en-têtes HTTP', score: 100, grade: 'A', deductions: [] },
+      { category: 'TLS', score: null, grade: null, deductions: [] },
+    ],
+    deductions: [],
+    findings: [],
+  });
+  await fixture.whenStable();
+  fixture.detectChanges();
+  const element: HTMLElement = fixture.nativeElement;
+  expect(element.textContent).toContain('Rapport partiel');
+  expect(element.textContent).toContain('La note porte uniquement sur les catégories évaluées.');
+  const scannerRows = element.querySelectorAll('[aria-labelledby="scanners-heading"] li');
+  expect(scannerRows[0].textContent).toContain('Évalué · 0 constat(s)');
+  expect(scannerRows[1].textContent).toContain('Non évalué : RuntimeError');
+  const categoryRows = element.querySelectorAll('[aria-labelledby="report-heading"] li');
+  expect(categoryRows[0].textContent).toContain('100 / 100');
+  expect(categoryRows[0].querySelector('[aria-label="Note A"]')).toBeTruthy();
+  expect(categoryRows[1].textContent).toContain('Non évaluée');
+  expect(categoryRows[1].textContent).not.toContain('/ 100');
+  expect(categoryRows[1].querySelector('app-grade-badge')).toBeNull();
+});
+
+it('affiche aussi les scanners en échec quand tous ont échoué', async () => {
+  const fixture = TestBed.createComponent(ScanPage);
+  fixture.detectChanges();
+  const http = TestBed.inject(HttpTestingController);
+  http.expectOne('/api/scans/scan').flush({
+    ...scan,
+    status: 'failed',
+    error: 'all scanners failed',
+    scanners: [
+      {
+        name: 'headers',
+        category: 'en-têtes HTTP',
+        status: 'error',
+        error: 'ConnectError',
+        findings_count: 0,
+      },
+    ],
+  });
+  await fixture.whenStable();
+  fixture.detectChanges();
+  expect(fixture.nativeElement.textContent).toContain('Non évalué : ConnectError');
+  expect(fixture.nativeElement.textContent).not.toContain('Rapport partiel');
+  http.expectNone('/api/scans/scan/report');
+});
+
 it.each(['done', 'failed'])('actualise à 2 secondes et arrête le suivi à %s', async (terminal) => {
   const fixture = TestBed.createComponent(ScanPage);
   fixture.detectChanges();
@@ -107,7 +175,15 @@ it.each(['done', 'failed'])('actualise à 2 secondes et arrête le suivi à %s',
     if (terminal === 'done') {
       http
         .expectOne('/api/scans/scan/report')
-        .flush({ score: 100, grade: 'A', categories: [], deductions: [], findings: [] });
+        .flush({
+          partial: false,
+          scanners: [],
+          score: 100,
+          grade: 'A',
+          categories: [],
+          deductions: [],
+          findings: [],
+        });
       await Promise.resolve();
       TestBed.tick();
     }
