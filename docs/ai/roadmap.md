@@ -46,5 +46,6 @@ Chaque branche n'ajoute que ce dont elle a besoin. Les contraintes de version so
 Pour les tests d'intégration (branches 7 et 9), une base PostgreSQL et un Redis de test sont lancés via Docker.
 
 Ligne 12 : `feat/scanner-tls` ajoute l'adaptateur sslyze avec IP épinglée, l'analyse
-pure et les règles TLS configurables. La démo TLS faible et sa note Playwright
-restent à confirmer sur la pile réelle.
+pure et les règles TLS configurables. `feat/scanner-zap` complète la ligne avec le
+pilotage passif de ZAP 2.16.1, le verrou Redis et l'isolation `zap-control`, limité à
+`APP_ENV=development` en attendant les NetworkPolicies k3s (ligne 13).

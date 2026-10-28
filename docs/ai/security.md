@@ -42,6 +42,18 @@ sslyze ne refait pas de DNS et ne reçoit aucun proxy ; le nom est conservé pou
 le SNI et la vérification du certificat. Une IP refusée lève `SsrfBlockedError`
 et donne un scanner `error`. Seules les commandes TLS nécessaires sont activées.
 
+Le scanner ZAP valide également l'hôte avec `resolve_and_check(host, 443, allowed_hosts=...)`
+avant tout appel, mais ZAP effectue ensuite ses propres requêtes et résolutions DNS.
+Sa sécurité repose donc sur l'isolation réseau (réseaux internes `zap-control` et
+`targets` dans Compose), sur un contexte ZAP restreint au domaine vérifié et sur le
+seul scan passif. Tant que le pare-feu de sortie k3s (`NetworkPolicy`, ligne 13) n'est
+pas en place pour bloquer les plages privées, le scanner `zap` est désactivé hors
+`APP_ENV=development` (retiré de la liste effective du worker et refusé par sa fabrique).
+Pour joindre l'API de ZAP sur son IP privée interne, `ZapHttpProbe` utilise
+`create_zap_internal_client()`, un client `httpx` interne dédié qui bloque toute
+requête hors de l'origine `/JSON/` configurée, n'active ni redirection ni proxy et
+filtre `apikey` des journaux HTTP. Ce client interne ne sert jamais à contacter une cible.
+
 ### WAF : remplacement du réseau de wafw00f
 
 wafw00f 2.4.2 n'est pas utilisé tel quel : son `Request` utilise `requests` avec

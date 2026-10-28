@@ -98,6 +98,11 @@ et `network_max_retries` (entier de 0 à 2, défaut 0).
 défaut 3). Les booléens sont refusés pour ces options numériques.
 `waf` accepte seulement `rules` (`waf_rules.yaml` par défaut) et `network_timeout`
 (entier de 1 à 10 secondes, défaut 3, booléens refusés).
+`zap` accepte `rules` (`zap_rules.yaml` par défaut), `api_url` (`http://zap:8080`
+par défaut, surchargeable via `ZAP_API_URL`), `api_key_env` (`ZAP_API_KEY` par
+défaut, nom de variable d’environnement uniquement), `max_depth` (1–10, défaut 3),
+`max_children` (1–200, défaut 50), `spider_timeout` (1–120 s, défaut 60) et
+`passive_timeout` (1–120 s, défaut 60). Il n’est chargé qu’avec `APP_ENV=development`.
 
 Les fabriques intégrées sont dans `BUILTIN_FACTORIES` (`scanners/plugins.py`).
 La découverte externe utilise exclusivement la stdlib :
@@ -146,7 +151,7 @@ l’écoute RQ ; le Compose utilise aussi ce point d’entrée.
 - `TlsScanner` : intégré sous le nom `tls`, catégorie `TLS` (détails ci-dessous).
 - `WafScanner` : intégré sous le nom `waf`, catégorie `Pare-feu applicatif` (détails ci-dessous).
 - `RateLimitScanner` : intégré sous le nom `ratelimit`, catégorie `Limitation de débit` (détails ci-dessous).
-- `ZapPassiveScanner` (branche `feat/scanner-zap`) : scan passif ZAP uniquement (pas de scan actif par défaut).
+- `ZapPassiveScanner` : intégré sous le nom `zap`, catégorie `Analyse passive (ZAP)` (détails ci-dessous).
 
 Écartés : API hébergées (SSL Labs, Mozilla Observatory : quotas, c'est leur serveur qui scanne), testssl.sh (doublon de sslyze), Nikto (bruyant, daté). Wapiti et Nuclei : plus tard, sites vérifiés uniquement.
 
@@ -215,6 +220,22 @@ Un WAF est une défense supplémentaire : son absence n'est pas une faille en so
 la détection est incertaine et sa présence ne prouve pas son efficacité.
 Les descriptions signalent les chaînes de type attaque envoyées par wafw00f
 et les alertes qu'elles peuvent déclencher (voir `security.md`).
+
+### Scanner passif ZAP
+
+`ZapPassiveScanner` valide d'abord le domaine avec `resolve_and_check(host, 443, allowed_hosts=...)`,
+prend un verrou distribué Redis (`scanner:zap:lock`, TTL 180 s, attente courte), puis
+`ZapHttpProbe` pilote l'API REST de ZAP 2.16.1 en scan passif uniquement : création d'un
+contexte dédié limité au domaine par expression régulière échappée (`^https://.../.*`),
+spider classique borné (profondeur 3, 50 enfants, 60 s), attente de `recordsToScan == 0`
+(60 s), lecture des alertes et suppression garantie du contexte dans `finally`.
+
+`analyze_zap` est pure : risque ZAP `High`/`Medium`/`Low`/`Informational` traduit en
+`Severity`, confiance `False Positive` ignorée, un constat `zap.<pluginId>` par règle
+avec nombre de pages touchées et 1 à 3 URL d'exemple dans une preuve bornée à 200
+caractères. `config/zap_rules.yaml` exclut les règles passives déjà couvertes par
+`headers` (`10010`, `10011`, `10021`, `10035`, `10038`, `10054`, `10055`, `10063`).
+Toute erreur ou occupation du verrou remonte : scanner non évalué (rapport partiel).
 
 ## Notation
 
