@@ -4,7 +4,8 @@ Ordre : tout faire marcher avec Docker Compose d'abord, puis passer à k3s, puis
 
 ## Docker Compose (`chore/docker-compose`)
 
-Depuis la racine : copier `.env.example` en `.env`, renseigner les deux secrets,
+Depuis la racine : copier `.env.example` en `.env`, renseigner les trois secrets
+(`JWT_SECRET`, `POSTGRES_PASSWORD`, `ZAP_API_KEY`),
 puis `docker compose up -d --wait` et `./scripts/demo.sh`. Python 3 suffit côté
 hôte pour les appels HTTP et le JSON du script. `docker compose down` conserve les
 données ; `docker compose down -v` efface les volumes. Le Compose de test reste
@@ -58,19 +59,25 @@ worker. Hors développement, ces réglages font échouer la validation au démar
 (voir `security.md`). `DNS_NAMESERVERS` accepte des IP explicites dans tous les
 environnements et ne relâche aucune validation HTTP.
 
-Le conteneur ZAP arrivera avec `feat/scanner-zap`, dans le réseau isolé décrit
-dans `security.md`. Le Compose actuel ne constitue pas le filtrage de sortie
+Le conteneur `zap` (`zaproxy/zap-stable:2.16.1`) tourne en démon sur `0.0.0.0:8080`
+sans port publié sur l'hôte, avec clé `ZAP_API_KEY`, mémoire bornée (`mem_limit: 1g`)
+et `start_period: 60s` pour absorber son démarrage lent (30–60 s) avant que le worker
+ne démarre. Il n'est relié qu'aux réseaux internes `zap-control` (avec le worker) et
+`targets` (avec `demo-site`), sans accès à PostgreSQL, Redis, l'API, CoreDNS ni Internet.
+Le Compose actuel ne constitue pas le filtrage de sortie
 nécessaire aux outils externes vers Internet : leurs règles de sortie restent à faire.
 Le scanner TLS épingle l'IP validée et utilise la CA publique de démo uniquement
 en développement, via les arguments de validation de certificat de sslyze.
 
-La note dépend des protocoles et suites réellement acceptés par l'image nginx.
+La note dépend des protocoles et suites réellement acceptés par l'image nginx et des
+alertes passives de ZAP hors exclusions d'en-têtes.
 `DEMO_EXPECTED_GRADE=E ./scripts/demo.sh` active une vérification facultative de la
 note ; sans cette variable, le script affiche le résultat. Le même réglage surcharge
-l'attente Playwright (`E` par défaut), qui vérifie aussi les catégories `TLS` et
-`Limitation de débit` et `Pare-feu applicatif`. Note mesurée sur la pile Docker :
-**E, 25/100** : 8 constats d'en-têtes, TLS 1.1 accepté (l'OpenSSL de l'image nginx ne
-propose plus 3DES), aucune limitation de débit et aucun pare-feu applicatif détecté.
+l'attente Playwright (`E` par défaut), qui vérifie aussi les catégories `TLS`,
+`Limitation de débit`, `Pare-feu applicatif` et `Analyse passive (ZAP)`. Note mesurée sur la
+pile Docker avec les 5 scanners : **E, 12/100**. ZAP ajoute 3 constats (en-tête
+anti-clickjacking absent, version du serveur divulguée, directives de cache) sans doublon
+avec le scanner d'en-têtes ; son analyse prend environ 3 s sur la démo.
 
 Après avoir modifié un fichier de `deploy/demo/` (par exemple `nginx.conf`), recréer le
 conteneur : `docker compose up -d --force-recreate demo-site`. Ces fichiers sont montés un par

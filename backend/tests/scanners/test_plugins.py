@@ -322,3 +322,129 @@ def test_waf_factory_defaults(monkeypatch):
         (scanner,) = load_scanners([ScannerConfig("waf", {})], client, config_dir)
         factory.assert_called_once_with(client, network_timeout=3)
     assert (scanner.name, scanner.category) == ("waf", "Pare-feu applicatif")
+
+
+@pytest.mark.parametrize("app_env", ["production", "test"])
+def test_zap_scanner_is_rejected_outside_development(monkeypatch, tmp_path, app_env):
+    discover(monkeypatch)
+    monkeypatch.setenv("ZAP_API_KEY", "secret-key")
+    with pytest.raises(ValueError, match="zap.*app_env=development"):
+        load_scanners([ScannerConfig("zap", {})], Mock(), tmp_path, app_env=app_env)
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"unknown": True},
+        {"api_key": "cleartext-secret"},
+        {"rules": ""},
+        {"rules": " "},
+        {"rules": 5},
+        {"rules": True},
+        {"api_url": ""},
+        {"api_url": "ftp://zap:8080"},
+        {"api_url": "http://user@zap:8080"},
+        {"api_url": "http://zap:8080/path"},
+        {"api_url": "http://zap:8080?x=1"},
+        {"api_url": " http://zap:8080"},
+        {"api_url": 8080},
+        {"api_key_env": ""},
+        {"api_key_env": "zap_api_key"},
+        {"api_key_env": "123_KEY"},
+        {"api_key_env": "ZAP-KEY"},
+        {"api_key_env": 5},
+        {"max_depth": True},
+        {"max_depth": False},
+        {"max_depth": 0},
+        {"max_depth": 11},
+        {"max_depth": 3.0},
+        {"max_depth": "3"},
+        {"max_children": True},
+        {"max_children": 0},
+        {"max_children": 201},
+        {"max_children": "50"},
+        {"spider_timeout": True},
+        {"spider_timeout": 0},
+        {"spider_timeout": 121},
+        {"spider_timeout": "60"},
+        {"passive_timeout": True},
+        {"passive_timeout": 0},
+        {"passive_timeout": 121},
+        {"passive_timeout": "60"},
+    ],
+)
+def test_zap_options_are_validated(monkeypatch, tmp_path, options):
+    discover(monkeypatch)
+    monkeypatch.setenv("ZAP_API_KEY", "secret-key")
+    monkeypatch.delenv("ZAP_API_URL", raising=False)
+    config_dir = Path(__file__).resolve().parents[2] / "config"
+    with pytest.raises(ValueError, match="zap"):
+        load_scanners([ScannerConfig("zap", options)], Mock(), config_dir)
+
+
+@pytest.mark.parametrize("secret", [None, "", "   ", " padded "])
+def test_zap_missing_or_blank_api_key_env_is_rejected(monkeypatch, secret):
+    discover(monkeypatch)
+    if secret is None:
+        monkeypatch.delenv("ZAP_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("ZAP_API_KEY", secret)
+    config_dir = Path(__file__).resolve().parents[2] / "config"
+    with pytest.raises(ValueError, match="zap.*ZAP_API_KEY"):
+        load_scanners([ScannerConfig("zap", {})], Mock(), config_dir)
+
+
+def test_zap_factory_receives_context_options_and_environment(monkeypatch, tmp_path):
+    from app.infra.zap_rules_config import load_zap_rules
+    from app.scanners.zap import ZapHttpProbe
+
+    discover(monkeypatch)
+    monkeypatch.setenv("CUSTOM_ZAP_KEY", "secret-from-env")
+    monkeypatch.setenv("ZAP_API_URL", "http://zap-env:8090")
+    config_dir = Path(__file__).resolve().parents[2] / "config"
+    (tmp_path / "custom_zap.yaml").write_text(
+        (config_dir / "zap_rules.yaml").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    probe_factory = Mock(wraps=ZapHttpProbe)
+    scanner_factory = Mock(wraps=plugins.ZapPassiveScanner)
+    monkeypatch.setattr(plugins, "ZapHttpProbe", probe_factory)
+    monkeypatch.setattr(plugins, "ZapPassiveScanner", scanner_factory)
+    fake_lock = Mock()
+
+    (scanner,) = load_scanners(
+        [
+            ScannerConfig(
+                "zap",
+                {
+                    "rules": "custom_zap.yaml",
+                    "api_url": "http://zap:8080",
+                    "api_key_env": "CUSTOM_ZAP_KEY",
+                    "max_depth": 4,
+                    "max_children": 40,
+                    "spider_timeout": 45,
+                    "passive_timeout": 30,
+                },
+            )
+        ],
+        Mock(),
+        tmp_path,
+        allowed_hosts={"demo.scanner.test"},
+        app_env="development",
+        zap_lock=fake_lock,
+    )
+    assert (scanner.name, scanner.category) == ("zap", "Analyse passive (ZAP)")
+    probe_factory.assert_called_once_with(
+        "http://zap-env:8090",
+        "secret-from-env",
+        max_depth=4,
+        max_children=40,
+        spider_timeout=45,
+        passive_timeout=30,
+    )
+    scanner_args = scanner_factory.call_args
+    assert isinstance(scanner_args.args[0], ZapHttpProbe)
+    assert scanner_args.args[1] == load_zap_rules(tmp_path / "custom_zap.yaml")
+    assert scanner_args.kwargs == {
+        "allowed_hosts": frozenset({"demo.scanner.test"}),
+        "lock": fake_lock,
+    }

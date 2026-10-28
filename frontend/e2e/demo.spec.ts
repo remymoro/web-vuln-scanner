@@ -4,8 +4,10 @@ import { resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
 
 const root = resolve(__dirname, '../..');
-// Mesuré sur la pile Docker : E, 25/100 (en-têtes, TLS 1.1, aucune limitation, aucun WAF). Surchargeable.
-const expectedGrade = process.env['DEMO_EXPECTED_GRADE'] ?? 'E';
+// Mesuré sur la pile Docker avec les 5 scanners : E, 12/100. Surchargeable.
+const DEFAULT_EXPECTED_GRADE = 'E';
+const SCAN_TIMEOUT_MS = 380_000;
+const expectedGrade = process.env['DEMO_EXPECTED_GRADE'] ?? DEFAULT_EXPECTED_GRADE;
 
 function publishTxt(value: string) {
   if (!/^scanner-verify=[A-Za-z0-9_-]+$/.test(value)) throw new Error('Jeton DNS inattendu');
@@ -37,9 +39,10 @@ function publishTxt(value: string) {
   if (write.status !== 0) throw new Error(`Publication DNS impossible : ${write.stderr}`);
 }
 
-test('inscription, connexion, preuve DNS et rapport TLS, débit et WAF sans violation CSP', async ({
+test('inscription, connexion, preuve DNS et rapport TLS, débit, WAF et ZAP sans violation CSP', async ({
   page,
 }) => {
+  test.setTimeout(420_000);
   const cspErrors: string[] = [];
   const pageErrors: string[] = [];
   await page.addInitScript(() => {
@@ -93,7 +96,7 @@ test('inscription, connexion, preuve DNS et rapport TLS, débit et WAF sans viol
   }).toPass({ timeout: 30_000, intervals: [1000, 2000] });
   await page.getByRole('button', { name: 'Lancer un scan', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Rapport de sécurité', exact: true })).toBeVisible(
-    { timeout: 320_000 },
+    { timeout: SCAN_TIMEOUT_MS },
   );
   await expect(
     page.getByTestId('report-grade').getByLabel(`Note ${expectedGrade}`, { exact: true }),
@@ -113,6 +116,11 @@ test('inscription, connexion, preuve DNS et rapport TLS, débit et WAF sans viol
   await expect(
     page.locator('section[aria-labelledby="report-heading"] li').filter({
       has: page.getByText('Pare-feu applicatif', { exact: true }),
+    }),
+  ).toBeVisible();
+  await expect(
+    page.locator('section[aria-labelledby="report-heading"] li').filter({
+      has: page.getByText('Analyse passive (ZAP)', { exact: true }),
     }),
   ).toBeVisible();
   await expect(

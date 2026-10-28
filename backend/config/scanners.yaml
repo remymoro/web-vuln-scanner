@@ -16,3 +16,12 @@ scanners:
     options:
       network_timeout: 3
       rules: waf_rules.yaml
+  - name: zap
+    options:
+      api_url: http://zap:8080
+      api_key_env: ZAP_API_KEY
+      max_depth: 3
+      max_children: 50
+      spider_timeout: 60
+      passive_timeout: 60
+      rules: zap_rules.yaml
