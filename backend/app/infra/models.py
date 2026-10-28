@@ -72,3 +72,20 @@ class FindingModel(Base):
     description: Mapped[str] = mapped_column(Text)
     evidence: Mapped[str] = mapped_column(Text)
     recommendation: Mapped[str] = mapped_column(Text)
+
+
+class ScannerRunModel(Base):
+    __tablename__ = "scanner_runs"
+    __table_args__ = (UniqueConstraint("scan_id", "scanner"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scans.id", ondelete="CASCADE"), index=True
+    )
+    scanner: Mapped[str] = mapped_column(Text)
+    category: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16))
+    error: Mapped[str | None] = mapped_column(Text)
+    findings_count: Mapped[int]
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

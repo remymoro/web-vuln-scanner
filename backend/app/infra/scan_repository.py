@@ -10,9 +10,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.domain.finding import Finding, Severity
+from app.domain.scanner_run import ScannerRun
 from app.domain.scans import Scan, ScanAlreadyActiveError, ScanStatus
 from app.domain.scoring import Grade
-from app.infra.models import FindingModel, ScanModel
+from app.infra.models import FindingModel, ScanModel, ScannerRunModel
 
 
 def _to_domain(model: ScanModel) -> Scan:
@@ -112,6 +113,31 @@ class SqlAlchemyScanRepository:
                 model.description,
                 model.evidence,
                 model.recommendation,
+            )
+            for model in models
+        ]
+
+    def replace_scanner_runs(self, scan_id: uuid.UUID, runs: Iterable[ScannerRun]) -> None:
+        self._session.execute(delete(ScannerRunModel).where(ScannerRunModel.scan_id == scan_id))
+        for run in runs:
+            self._session.add(ScannerRunModel(scan_id=scan_id, **asdict(run)))
+        self._session.flush()
+
+    def get_scanner_runs(self, scan_id: uuid.UUID) -> list[ScannerRun]:
+        models = self._session.scalars(
+            select(ScannerRunModel)
+            .where(ScannerRunModel.scan_id == scan_id)
+            .order_by(ScannerRunModel.started_at, ScannerRunModel.scanner)
+        )
+        return [
+            ScannerRun(
+                model.scanner,
+                model.category,
+                model.status,
+                model.error,
+                model.findings_count,
+                model.started_at,
+                model.finished_at,
             )
             for model in models
         ]

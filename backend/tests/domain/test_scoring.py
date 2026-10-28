@@ -1,8 +1,10 @@
 from dataclasses import FrozenInstanceError
+from datetime import UTC, datetime
 
 import pytest
 
 from app.domain.finding import Finding, Severity
+from app.domain.scanner_run import ScannerRun, is_partial
 from app.domain.scoring import DEFAULT_POLICY, Deduction, Grade, ScoringPolicy, score
 
 
@@ -52,6 +54,53 @@ def test_no_findings():
     assert (report.score, report.grade) == (100, Grade.A)
     assert report.categories == ()
     assert report.deductions == ()
+
+
+def test_clean_evaluated_category_has_a_score():
+    now = datetime.now(UTC)
+    report = score([], DEFAULT_POLICY, [ScannerRun("test", "headers", "ok", None, 0, now, now)])
+    assert (report.score, report.grade) == (100, Grade.A)
+    assert [(item.category, item.score, item.grade) for item in report.categories] == [
+        ("headers", 100, Grade.A)
+    ]
+
+
+def test_failed_scanner_has_no_penalty_and_is_not_evaluated():
+    now = datetime.now(UTC)
+    runs = [
+        ScannerRun("test", "headers", "ok", None, 1, now, now),
+        ScannerRun("tls", "tls", "error", "ValueError", 0, now, now),
+    ]
+    report = score([make_finding()], DEFAULT_POLICY, runs)
+    assert (report.score, report.grade) == (90, Grade.A)
+    assert is_partial(runs)
+    assert [(item.category, item.score, item.grade) for item in report.categories] == [
+        ("headers", 90, Grade.A),
+        ("tls", None, None),
+    ]
+    assert report.categories[1].deductions == ()
+
+
+def test_findings_from_failed_scanner_do_not_affect_scoring():
+    now = datetime.now(UTC)
+    runs = [ScannerRun("test", "headers", "error", "ValueError", 0, now, now)]
+    report = score([make_finding()], DEFAULT_POLICY, runs)
+    assert report.score == 100
+    assert report.deductions == ()
+    assert report.categories[0].score is None
+
+
+def test_shared_category_is_evaluated_when_one_scanner_succeeds():
+    now = datetime.now(UTC)
+    runs = [
+        ScannerRun("test", "headers", "ok", None, 0, now, now),
+        ScannerRun("other", "headers", "error", "ValueError", 0, now, now),
+    ]
+    report = score([], DEFAULT_POLICY, runs)
+    assert [(item.category, item.score, item.grade) for item in report.categories] == [
+        ("headers", 100, Grade.A)
+    ]
+    assert is_partial(runs)
 
 
 def test_one_medium_finding():

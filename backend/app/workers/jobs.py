@@ -9,24 +9,25 @@ from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 
-import httpx
 from redis import Redis
+from rq import Worker
 from rq.job import Job
 from rq.timeouts import JobTimeoutException
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import get_settings
+from app.domain.finding import Finding
 from app.domain.ports import Scanner
 from app.domain.scans import ScanStatus, execute_scan
 from app.domain.scoring import ScoringPolicy
+from app.domain.target import Target
 from app.infra.db import create_db_engine, create_session_factory
-from app.infra.header_rules_config import load_header_rules
 from app.infra.scan_repository import SqlAlchemyScanRepository
+from app.infra.scanners_config import load_scanners_config
 from app.infra.scoring_config import load_scoring_policy
 from app.infra.target_repository import SqlAlchemyTargetRepository
-from app.scanners.headers import HeadersScanner
-from app.scanners.registry import ScannerRegistry
-from app.security.ssrf import SsrfBlockedError, create_safe_client
+from app.scanners.plugins import load_scanners
+from app.security.ssrf import create_safe_client
 
 CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
 
@@ -53,17 +54,20 @@ def build_worker_runtime() -> WorkerRuntime:
     settings = get_settings()
     sessions = get_worker_sessions()
     policy = load_scoring_policy(CONFIG_DIR / "scoring.yaml")
-    rules = load_header_rules(CONFIG_DIR / "header_rules.yaml")
+    configs = load_scanners_config(CONFIG_DIR / "scanners.yaml")
     client = create_safe_client(
         allowed_hosts=(
             settings.dev_ssrf_allowed_hosts if settings.app_env == "development" else ()
         ),
         extra_ca_file=(settings.dev_extra_ca_file if settings.app_env == "development" else None),
     )
+    try:
+        scanners = load_scanners(configs, client, CONFIG_DIR)
+    except BaseException:
+        client.close()
+        raise
     atexit.register(client.close)
-    registry = ScannerRegistry()
-    registry.register(HeadersScanner(client, rules))
-    return WorkerRuntime(sessions, registry.all(), policy)
+    return WorkerRuntime(sessions, scanners, policy)
 
 
 @lru_cache
@@ -84,6 +88,23 @@ def _mark_failed(scan_id: uuid.UUID, reason: str) -> None:
             session.commit()
 
 
+class _ScanDeadlineExceeded(BaseException):
+    """Le délai global RQ doit traverser l'isolation des erreurs des scanners."""
+
+
+class _ScannerWithJobDeadline:
+    def __init__(self, scanner: Scanner) -> None:
+        self._scanner = scanner
+        self.name = scanner.name
+        self.category = scanner.category
+
+    def run(self, target: Target) -> list[Finding]:
+        try:
+            return self._scanner.run(target)
+        except JobTimeoutException as exc:
+            raise _ScanDeadlineExceeded from exc
+
+
 def run_scan(scan_id: str) -> None:
     identifier = uuid.UUID(scan_id)
     try:
@@ -92,13 +113,15 @@ def run_scan(scan_id: str) -> None:
             execute_scan(
                 SqlAlchemyScanRepository(session),
                 SqlAlchemyTargetRepository(session),
-                runtime.scanners,
+                tuple(_ScannerWithJobDeadline(scanner) for scanner in runtime.scanners),
                 runtime.policy,
                 identifier,
                 lambda: datetime.now(UTC),
-                (httpx.HTTPError, SsrfBlockedError),
                 session.commit,
             )
+    except _ScanDeadlineExceeded:
+        _mark_failed(identifier, "timeout")
+        raise JobTimeoutException("Scan deadline exceeded") from None
     except JobTimeoutException:
         _mark_failed(identifier, "timeout")
         raise
@@ -118,3 +141,16 @@ def on_scan_failure(
         _mark_failed(uuid.UUID(job.args[0]), "timeout")
     elif not job.should_retry:
         _mark_failed(uuid.UUID(job.args[0]), "worker error")
+
+
+def main() -> None:
+    get_worker_runtime()
+    connection = Redis.from_url(get_settings().redis_url)
+    try:
+        Worker(["scans"], connection=connection).work(with_scheduler=True)
+    finally:
+        connection.close()
+
+
+if __name__ == "__main__":
+    main()

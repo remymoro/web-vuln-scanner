@@ -84,12 +84,7 @@ services:
       <<: *backend-environment
       DEV_SSRF_ALLOWED_HOSTS: '["demo.scanner.test"]'
       DEV_EXTRA_CA_FILE: /trust/ca.crt
-    command:
-      - /bin/sh
-      - -ec
-      - >-
-        python -c 'from app.config import get_settings; get_settings()';
-        exec rq worker scans --with-scheduler --url "$$REDIS_URL"
+    command: ["python", "-m", "app.workers.jobs"]
     volumes:
       - demo-trust:/trust:ro
     networks: [worker-data, targets]

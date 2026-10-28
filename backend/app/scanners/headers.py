@@ -113,6 +113,7 @@ class HeadersScanner:
     """Utilise le client injecté, créé par create_safe_client() ; n'en crée jamais."""
 
     name = "headers"
+    category = "en-têtes HTTP"
 
     def __init__(self, client: httpx.Client, rules: Sequence[HeaderRule]) -> None:
         self._client = client

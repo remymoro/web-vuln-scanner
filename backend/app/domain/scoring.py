@@ -5,6 +5,7 @@ from itertools import pairwise
 from types import MappingProxyType
 
 from app.domain.finding import Finding, Severity
+from app.domain.scanner_run import ScannerRun
 
 
 class Grade(StrEnum):
@@ -69,8 +70,8 @@ class Deduction:
 @dataclass(frozen=True)
 class CategoryScore:
     category: str
-    score: int
-    grade: Grade
+    score: int | None
+    grade: Grade | None
     deductions: tuple[Deduction, ...]
 
 
@@ -82,19 +83,35 @@ class ScoreReport:
     deductions: tuple[Deduction, ...]
 
 
-def score(findings: Iterable[Finding], policy: ScoringPolicy) -> ScoreReport:
+def score(
+    findings: Iterable[Finding],
+    policy: ScoringPolicy,
+    scanner_runs: Iterable[ScannerRun] | None = None,
+) -> ScoreReport:
+    runs = None if scanner_runs is None else tuple(scanner_runs)
+    evaluated = None if runs is None else {run.scanner for run in runs if run.status == "ok"}
     deductions = tuple(
         Deduction(
             finding.id, finding.category, finding.severity, policy.penalties[finding.severity]
         )
         for finding in findings
+        if evaluated is None or finding.scanner in evaluated
     )
     by_category: dict[str, list[Deduction]] = {}
+    evaluated_categories = (
+        set() if runs is None else {run.category for run in runs if run.status == "ok"}
+    )
+    if runs is not None:
+        for run in runs:
+            by_category.setdefault(run.category, [])
     for deduction in deductions:
         by_category.setdefault(deduction.category, []).append(deduction)
 
     categories = []
     for category, items in sorted(by_category.items()):
+        if runs is not None and category not in evaluated_categories:
+            categories.append(CategoryScore(category, None, None, ()))
+            continue
         category_score = max(0, 100 - sum(item.points for item in items))
         categories.append(
             CategoryScore(category, category_score, policy.grade_for(category_score), tuple(items))

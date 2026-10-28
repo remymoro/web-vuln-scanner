@@ -9,6 +9,7 @@ from rq.job import JobStatus
 from sqlalchemy import select
 
 from app.api.main import create_app
+from app.domain.scanner_run import ScannerRun
 from app.domain.scans import QueueUnavailableError, Scan, ScanStatus
 from app.domain.scoring import DEFAULT_POLICY, ScoringPolicy
 from app.infra.models import ScanModel
@@ -73,6 +74,8 @@ def test_request_returns_pending_and_conflicts_if_already_active(
     pending = read_scan(client, headers, body["id"])
     assert pending["target_id"] == target["id"]
     assert pending["status"] == "pending"
+    assert pending["partial"] is False
+    assert pending["scanners"] == []
     assert datetime.fromisoformat(pending["created_at"]).tzinfo is not None
     for field in ("started_at", "finished_at", "score", "grade", "error"):
         assert pending[field] is None
@@ -207,6 +210,51 @@ def test_end_to_end_scan_and_report(client, app, headers, target, worker, redis_
     assert request_scan(client, headers, target["id"]).status_code == 202
 
 
+def test_end_to_end_partial_report(client, headers, target, worker, redis_connection):
+    queue = worker(
+        [
+            FakeScanner(
+                error=RuntimeError("secret traceback and credentials"),
+                name="broken",
+                category="TLS",
+            ),
+            FakeScanner([FINDING]),
+            FakeScanner(name="clean", category="propre"),
+        ]
+    )
+    scan_id = request_scan(client, headers, target["id"]).json()["id"]
+    work(redis_connection)
+    done = read_scan(client, headers, scan_id)
+    assert done["status"] == "done"
+    assert done["partial"] is True
+    assert done["score"] == 90
+    assert done["scanners"] == [
+        {
+            "name": "broken",
+            "category": "TLS",
+            "status": "error",
+            "error": "RuntimeError",
+            "findings_count": 0,
+        },
+        {"name": "fake", "category": "headers", "status": "ok", "error": None, "findings_count": 1},
+        {"name": "clean", "category": "propre", "status": "ok", "error": None, "findings_count": 0},
+    ]
+    response = client.get(f"/scans/{scan_id}/report", headers=headers)
+    assert response.status_code == 200
+    report = response.json()
+    assert report["partial"] is True
+    assert report["scanners"] == done["scanners"]
+    assert [(row["category"], row["score"], row["grade"]) for row in report["categories"]] == [
+        ("TLS", None, None),
+        ("headers", 90, "A"),
+        ("propre", 100, "A"),
+    ]
+    assert report["findings"] == [asdict(FINDING)]
+    assert client.get(f"/targets/{target['id']}/scans", headers=headers).json() == [done]
+    assert queue.finished_job_registry.count == 1
+    assert queue.scheduled_job_registry.count == 0
+
+
 def test_timeout_is_terminal_without_retry(
     client, headers, target, worker, redis_connection, settings
 ):
@@ -238,15 +286,24 @@ def test_target_errors_fail_without_rq_retry(
     work(redis_connection)
     failed = read_scan(client, headers, scan_id)
     assert failed["status"] == "failed"
-    assert failed["error"] == f"target error: {type(error).__name__}"
+    assert failed["error"] == "all scanners failed"
+    assert failed["scanners"][0]["error"] == type(error).__name__
     assert queue.scheduled_job_registry.count == 0
     assert queue.finished_job_registry.count == 1
 
 
 def test_infrastructure_error_retries_then_marks_failed(
-    client, app, headers, target, worker, redis_connection
+    client, app, headers, target, worker, redis_connection, monkeypatch
 ):
-    queue = worker([FakeScanner(error=RuntimeError("infrastructure down"))])
+    original = SqlAlchemyScanRepository.replace_scanner_runs
+
+    def broken_storage(self, scan_id, runs):
+        if runs:
+            raise RuntimeError("infrastructure down")
+        original(self, scan_id, runs)
+
+    monkeypatch.setattr(SqlAlchemyScanRepository, "replace_scanner_runs", broken_storage)
+    queue = worker([FakeScanner()])
     scan_id = request_scan(client, headers, target["id"]).json()["id"]
     job = queue.jobs[0]
     for attempt in range(1, 4):
@@ -268,16 +325,30 @@ def test_infrastructure_error_retries_then_marks_failed(
 
 
 def test_retry_can_succeed_and_replace_previous_findings(
-    client, app, headers, target, worker, redis_connection
+    client, app, headers, target, worker, redis_connection, monkeypatch
 ):
-    scanner = FakeScanner(error=RuntimeError("temporary infrastructure error"))
+    original = SqlAlchemyScanRepository.replace_scanner_runs
+
+    def broken_storage(self, scan_id, runs):
+        if runs:
+            raise RuntimeError("temporary infrastructure error")
+        original(self, scan_id, runs)
+
+    monkeypatch.setattr(SqlAlchemyScanRepository, "replace_scanner_runs", broken_storage)
+    scanner = FakeScanner()
     queue = worker([scanner])
     scan_id = request_scan(client, headers, target["id"]).json()["id"]
     job = queue.jobs[0]
     work(redis_connection)
     with app.state.session_factory() as session:
-        SqlAlchemyScanRepository(session).replace_findings(uuid.UUID(scan_id), [FINDING, FINDING])
+        repository = SqlAlchemyScanRepository(session)
+        repository.replace_findings(uuid.UUID(scan_id), [FINDING, FINDING])
+        now = datetime.now(UTC)
+        original(
+            repository, uuid.UUID(scan_id), [ScannerRun("old", "old", "ok", None, 2, now, now)]
+        )
         session.commit()
+    monkeypatch.setattr(SqlAlchemyScanRepository, "replace_scanner_runs", original)
     scanner.error = None
     scanner.findings = [FINDING]
     queue.scheduled_job_registry.requeue(job)
@@ -286,6 +357,7 @@ def test_retry_can_succeed_and_replace_previous_findings(
     report = client.get(f"/scans/{scan_id}/report", headers=headers).json()
     assert report["findings"] == [asdict(FINDING)]
     assert report["score"] == 90
+    assert [run["name"] for run in report["scanners"]] == ["fake"]
     with app.state.session_factory() as session:
         assert SqlAlchemyScanRepository(session).get(uuid.UUID(scan_id)).attempts == 2
 
