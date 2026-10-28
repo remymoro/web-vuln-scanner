@@ -78,7 +78,26 @@ ces exceptions : il devra respecter les règles d'épinglage et d'isolation ci-d
 Le Compose de démo sépare API et worker sur deux réseaux de données internes,
 avec PostgreSQL et Redis sur les deux. Un réseau interne supplémentaire relie
 uniquement worker et site de démo ; un autre relie uniquement API et CoreDNS.
-Seule l'API publie un port, sur la boucle locale de l'hôte, via le seul réseau non
-interne (`edge`), qu'elle ne partage avec aucun autre service. Le worker n'a aucun
+L’API et le frontend publient leurs ports sur la boucle locale via le réseau non
+interne `edge`. Le réseau interne `web` ne relie que ces deux services. Le worker n'a aucun
 accès à Internet. Le filtrage de sortie des futurs outils externes reste
 à implémenter avant leur activation.
+
+## Navigateur et frontend
+
+Le JWT est conservé dans `sessionStorage` : il survit à un rechargement dans le même
+onglet, sans persister après sa fermeture comme le ferait `localStorage`. Il reste
+accessible à JavaScript : ce choix pédagogique ne protège pas d’une XSS. Aucun
+jeton n’est stocké dans l’URL ; l’intercepteur ne transmet Bearer qu’aux routes
+relatives `/api/`. Un 401 efface le jeton et redirige vers la connexion.
+
+nginx génère un nonce avec `$request_id`, remplace le marqueur `ngCspNonce` de
+`app-root` et utilise la même valeur dans `style-src`. Angular applique ce nonce
+aux styles créés à l’exécution. `inlineCritical` est désactivé ; scripts et feuilles
+CSS du build sont externes, sans `unsafe-inline` ni `unsafe-eval`. La CSP limite
+les connexions à l’origine, interdit objets et frames (`frame-ancestors 'none'`),
+et s’accompagne de nosniff, Referrer-Policy, Permissions-Policy et HSTS d’un an.
+Le HTML et ses en-têtes ne sont pas mis en cache, pour garder nonce et CSP cohérents.
+HSTS sera effectif derrière une terminaison HTTPS ; la démo locale est servie en HTTP.
+Playwright échoue sur les violations CSP, contrôle le nonce et parcourt l’application
+servie par nginx. Les preuves des constats sont rendues comme texte, sans `innerHTML`.

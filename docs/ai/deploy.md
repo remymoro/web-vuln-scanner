@@ -14,6 +14,12 @@ indépendant (`docker-compose.test.yml`).
   verrouillées sans celles de développement, utilisateur non root. API par défaut,
   migrations Alembic et worker RQ par surcharge de commande. La CI construit l'image
   sans la publier.
+- Le frontend est construit avec `node:24.15.0-alpine`, puis servi par
+  `nginx:1.28.0-alpine3.21` sans root sur 8080. Il attend l’API saine.
+  Le réseau interne `web` ne relie que frontend et API ; `/api/` est relayé vers
+  `http://api:8000/`. Les autres chemins retombent sur `index.html` pour les routes SPA.
+  Le HTML n’est pas mis en cache : un nonce nginx par réponse autorise les styles
+  Angular sous une CSP stricte (voir `security.md`).
 - PostgreSQL 17 et Redis 7 (AOF) ont chacun un volume. `migrate` attend PostgreSQL
   sain et termine avant l'API et le worker. L'API attend aussi Redis et CoreDNS ;
   le worker attend Redis et le site HTTPS sain. Sa commande valide d'abord les
@@ -31,7 +37,7 @@ indépendant (`docker-compose.test.yml`).
   atomique et incrément du numéro SOA ; le plugin `file` recharge sous 2 s, sans
   redémarrage ni modification d'un fichier du dépôt. Aucun DNS public n'est utilisé.
 
-Seule l'API rejoint `edge`, le seul réseau non interne : Docker ne publie un port que
+L’API et le frontend rejoignent `edge`, le seul réseau non interne : Docker ne publie un port que
 sur un tel réseau. Tous les autres sont `internal: true` : `api-data` relie API, migrations,
 PostgreSQL et Redis ; `worker-data` relie worker, PostgreSQL et Redis ; `targets`
 relie uniquement worker et nginx (alias `demo.scanner.test`). API et worker n'ont
@@ -41,7 +47,7 @@ En cas de conflit avec un réseau local, changer ensemble le sous-réseau, l'IP 
 ses références dans Compose, la zone et le script. Le worker résout la cible via
 l'alias Docker ; CoreDNS ne fournit que la preuve TXT à l'API.
 
-Seul `127.0.0.1:8000` est publié. Le worker n'a aucun accès à Internet : ce montage
+Le frontend publie `127.0.0.1:4200` et l’API conserve `127.0.0.1:8000`. Le worker n'a aucun accès à Internet : ce montage
 ne scanne que le site de démo. Le mode `APP_ENV=development` active explicitement l'exception
 anti-SSRF pour le seul nom de démo et ajoute sa CA publique au contexte TLS du
 worker. Hors développement, ces réglages font échouer la validation au démarrage

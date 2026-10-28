@@ -20,7 +20,7 @@ backend/
   config/       Barème de notation et règles des scanners (YAML)
   migrations/   Migrations Alembic
   tests/        Tests du backend
-frontend/       Interface Angular à venir
+frontend/       Interface Angular : authentification, sites, suivi et rapports
 deploy/         Configuration du site et du DNS de démonstration
 docs/ai/        Architecture et feuille de route
 ```
@@ -61,7 +61,8 @@ docker compose down
 Le script crée un compte unique, publie sa preuve TXT dans le volume CoreDNS,
 vérifie la propriété puis affiche la note et les constats du scan HTTPS.
 Il attend au maximum 360 s pour le scan (`DEMO_TIMEOUT_SECONDS` pour changer ce délai).
-L'API est accessible sur http://127.0.0.1:8000/docs ; le site de démo et les services
+La démo dans le navigateur est accessible sur http://127.0.0.1:4200.
+L'API reste accessible sur http://127.0.0.1:8000/docs ; le site de démo et les services
 de données ne publient aucun port. Après modification du code :
 `docker compose up -d --build --wait`.
 
@@ -98,3 +99,36 @@ Documentation interactive : http://127.0.0.1:8000/docs
 
 Dans un autre terminal, depuis `backend/`, exporter `REDIS_URL` puis lancer le worker : `uv run rq worker scans --url "$REDIS_URL"`.
 Ajouter `--with-scheduler` à cette commande pour activer les relances différées (10 puis 30 s).
+
+## Frontend Angular
+
+Node est fixé par `frontend/.nvmrc`. Pour développer, laisser la pile Compose
+fonctionner et arrêter son frontend pour libérer le port 4200 :
+
+```sh
+docker compose stop frontend
+cd frontend
+source ~/.nvm/nvm.sh
+nvm use
+npm ci
+npx ng serve
+```
+
+Ouvrir http://127.0.0.1:4200. Le proxy de développement transmet `/api/...`
+à l’API sur le port 8000 en retirant `/api`, sans changement CORS.
+
+```sh
+# Depuis frontend/, avec le même Node
+npx ng test --watch=false
+npx ng build
+# Contre la pile Docker complète, frontend nginx compris (pas ng serve)
+npm run e2e
+```
+
+Le test Playwright Chromium crée un compte unique, déclare `demo.scanner.test`,
+publie le TXT dans CoreDNS via `docker compose exec -T demo-dns` (accès Docker requis),
+puis attend un rapport D. Il contrôle aussi la CSP et les erreurs du navigateur.
+Il ne tourne pas en CI. Pour reprendre le frontend Docker après `ng serve`,
+arrêter le serveur de développement puis lancer `docker compose up -d frontend`.
+La preuve TXT peut être publiée manuellement avec la même logique que `scripts/demo.sh` ;
+le script crée son propre compte et son propre jeton, distincts de ceux du navigateur.
