@@ -98,6 +98,16 @@ délai ; le délai RQ du scan est le filet de sécurité global.
 
 ## Limites
 
+- `ratelimit` réutilise uniquement le client anti-SSRF injecté par le worker :
+  GET séquentiels, sans redirection, au plus 30 requêtes en 3 s par défaut
+  (configuration bornée à 5–100 requêtes et 1–10 s, booléens refusés).
+  Arrêt au premier refus 429 ou 503 avec `Retry-After`, ainsi qu'au premier
+  en-tête de limitation reconnu. Chaque réponse est fermée sans charger son corps.
+  L'horloge monotone interdit tout nouveau départ après le budget ; les délais
+  HTTP sont plafonnés au temps restant sans allonger ceux du client. HTTPX applique
+  ses délais par opération réseau : la requête en cours peut dépasser ce budget,
+  notamment en résolution DNS ou si les en-têtes arrivent lentement. Le délai RQ
+  global reste le filet de sécurité. Une erreur réseau remonte sans constat d'absence.
 - `feat/queue-workers` : un seul scan actif par cible (verrou en base) et délai maximum par scan (le scan passe à `failed` au-delà).
 - Plus tard : quota de scans par utilisateur, limite d'appels à `POST /targets/{id}/verify` (chaque appel déclenche une requête DNS), preuve de propriété alternative par fichier dans `/.well-known/`.
 

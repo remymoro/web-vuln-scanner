@@ -4,7 +4,9 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+import respx
 
+from app.domain.target import Target
 from app.infra.scanners_config import ScannerConfig
 from app.scanners import plugins
 from app.scanners.plugins import ScannerContext, load_scanners
@@ -184,3 +186,74 @@ def test_tls_factory_receives_network_options_and_rules(monkeypatch):
     )
     assert [(scanner.name, scanner.category) for scanner in scanners] == [("tls", "TLS")]
     probe.assert_called_once_with(network_timeout=2, network_max_retries=1, extra_ca_file=ca)
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"unknown": True},
+        {"rules": ""},
+        {"rules": " "},
+        {"rules": 5},
+        {"rules": True},
+        {"max_requests": True},
+        {"max_requests": False},
+        {"max_requests": 4},
+        {"max_requests": 101},
+        {"max_requests": 30.0},
+        {"max_requests": "30"},
+        {"max_requests": None},
+        {"max_duration": True},
+        {"max_duration": False},
+        {"max_duration": 0},
+        {"max_duration": 11},
+        {"max_duration": 3.0},
+        {"max_duration": "3"},
+        {"max_duration": None},
+    ],
+)
+def test_ratelimit_options_are_validated(monkeypatch, tmp_path, options):
+    discover(monkeypatch)
+    with pytest.raises(ValueError, match="ratelimit"):
+        load_scanners([ScannerConfig("ratelimit", options)], Mock(), tmp_path)
+
+
+@pytest.mark.parametrize(
+    "options",
+    [{}, {"max_requests": 5, "max_duration": 1}, {"max_requests": 100, "max_duration": 10}],
+)
+def test_ratelimit_factory_receives_context_client_options_and_relative_rules(
+    monkeypatch, tmp_path, options
+):
+    from app.infra.ratelimit_rules_config import load_ratelimit_rules
+    from app.scanners.ratelimit import RateLimitScanner
+
+    discover(monkeypatch)
+    config_dir = Path(__file__).resolve().parents[2] / "config"
+    rules_yaml = (config_dir / "ratelimit_rules.yaml").read_text(encoding="utf-8")
+    (tmp_path / "custom.yaml").write_text(rules_yaml, encoding="utf-8")
+    factory = Mock(wraps=RateLimitScanner)
+    monkeypatch.setattr(plugins, "RateLimitScanner", factory)
+    with respx.mock(assert_all_called=True) as router:
+        route = router.get("https://example.test/").respond(429)
+        with create_safe_client() as client:
+            (scanner,) = load_scanners(
+                [ScannerConfig("ratelimit", {**options, "rules": "custom.yaml"})], client, tmp_path
+            )
+            factory.assert_called_once_with(
+                client,
+                load_ratelimit_rules(tmp_path / "custom.yaml"),
+                max_requests=options.get("max_requests", 30),
+                max_duration=options.get("max_duration", 3),
+            )
+            assert scanner.run(Target("https://example.test/")) == []
+            assert not client.is_closed
+        assert route.call_count == 1
+
+
+def test_ratelimit_factory_uses_default_rules_file(monkeypatch):
+    discover(monkeypatch)
+    config_dir = Path(__file__).resolve().parents[2] / "config"
+    with create_safe_client() as client:
+        (scanner,) = load_scanners([ScannerConfig("ratelimit", {})], client, config_dir)
+    assert (scanner.name, scanner.category) == ("ratelimit", "Limitation de débit")

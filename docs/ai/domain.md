@@ -93,6 +93,9 @@ Les options spécifiques sont validées par la fabrique ; `headers` accepte seul
 `rules`, un chemin résolu depuis le dossier de configuration. `tls` accepte `rules`
 (`tls_rules.yaml` par défaut), `network_timeout` (entier de 1 à 10 secondes, défaut 3)
 et `network_max_retries` (entier de 0 à 2, défaut 0).
+`ratelimit` accepte `rules` (`ratelimit_rules.yaml` par défaut), `max_requests`
+(entier de 5 à 100, défaut 30) et `max_duration` (entier de 1 à 10 secondes,
+défaut 3). Les booléens sont refusés pour ces options numériques.
 
 Les fabriques intégrées sont dans `BUILTIN_FACTORIES` (`scanners/plugins.py`).
 La découverte externe utilise exclusivement la stdlib :
@@ -140,7 +143,7 @@ l’écoute RQ ; le Compose utilise aussi ce point d’entrée.
 - `HeadersScanner` : présence et valeur des en-têtes (HSTS avec max-age suffisant, CSP sans `unsafe-inline`, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, cookies Secure/HttpOnly/SameSite). Règles lues depuis un fichier de config, comme les modèles de Nuclei.
 - `TlsScanner` : intégré sous le nom `tls`, catégorie `TLS` (détails ci-dessous).
 - `WafScanner` : wafw00f (bibliothèque importée) — requêtes de test inoffensives et analyse des réponses.
-- `RateLimitScanner` : code maison, rafale contrôlée et limitée, détection des réponses 429.
+- `RateLimitScanner` : intégré sous le nom `ratelimit`, catégorie `Limitation de débit` (détails ci-dessous).
 - `ZapPassiveScanner` (branche `feat/scanner-zap`) : scan passif ZAP uniquement (pas de scan actif par défaut).
 
 Écartés : API hébergées (SSL Labs, Mozilla Observatory : quotas, c'est leur serveur qui scanne), testssl.sh (doublon de sslyze), Nikto (bruyant, daté). Wapiti et Nuclei : plus tard, sites vérifiés uniquement.
@@ -172,6 +175,25 @@ un résultat ROBOT indéterminé produisent `TlsProbeError`, donc un run `error`
 constats ni pénalité TLS. Cela évite de noter une analyse incomplète comme saine.
 Le délai réseau et les relances bornent chaque connexion ; le délai global RQ
 reste la limite de durée de l'ensemble du scan.
+
+### Scanner de limitation de débit
+
+La collecte `collect_burst` renvoie un `BurstResult` gelé (nombre de requêtes,
+durée monotone et signe détecté) ; `analyze_ratelimit` est pure. La rafale envoie
+des GET séquentiels vers `Target.url`, sans redirection ni lecture du corps.
+Elle s'arrête au premier 429, 503 avec `Retry-After`, ou en-tête présent parmi
+`RateLimit-Limit`, `RateLimit-Policy`, `RateLimit` (brouillons IETF),
+`X-RateLimit-Limit`, `X-RateLimit-Remaining`, quelle que soit sa valeur.
+Un signe suffit à ne produire aucun constat ; il ne prouve pas l'efficacité
+de la protection. Un 503 sans `Retry-After` n'est pas un signe à lui seul.
+
+Sans signe au terme du nombre maximal ou du budget de durée, un seul constat
+`ratelimit.absent` est émis, avec nombre et durée observés. Sa gravité `low`, son
+texte et sa recommandation viennent de `config/ratelimit_rules.yaml`, validé au
+démarrage avec cet identifiant unique. Seule la page d'accueil (URL de la cible)
+est testée : d'autres routes, méthodes, identités ou fenêtres de temps peuvent être
+protégées. L'absence de signe dans cette courte rafale ne prouve pas une absence
+générale de limitation. Toute erreur réseau remonte : scanner non évalué, sans pénalité.
 
 ## Notation
 
