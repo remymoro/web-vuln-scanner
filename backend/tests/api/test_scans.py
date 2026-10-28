@@ -9,7 +9,7 @@ from rq.job import JobStatus
 from sqlalchemy import select
 
 from app.api.main import create_app
-from app.domain.scans import QueueUnavailableError, ScanStatus
+from app.domain.scans import QueueUnavailableError, Scan, ScanStatus
 from app.domain.scoring import DEFAULT_POLICY, ScoringPolicy
 from app.infra.models import ScanModel
 from app.infra.scan_queue import RqScanQueue
@@ -326,3 +326,40 @@ def test_second_scan_within_cooldown_returns_429_with_retry_after(
     response = request_scan(client, headers, target["id"])
     assert response.status_code == 429
     assert 1 <= int(response.headers["retry-after"]) <= 600
+
+
+def test_target_history_is_empty_then_matches_scan_response(client, headers, target):
+    path = f"/targets/{target['id']}/scans"
+    assert client.get(path, headers=headers).json() == []
+    scan_id = request_scan(client, headers, target["id"]).json()["id"]
+    response = client.get(path, headers=headers)
+    assert response.status_code == 200
+    assert response.json() == [read_scan(client, headers, scan_id)]
+
+
+def test_target_history_is_limited_and_ordered(client, app, headers, target):
+    now = datetime.now(UTC)
+    scans = [
+        replace(
+            Scan.create(uuid.UUID(target["id"])), created_at=now - timedelta(seconds=index)
+        ).fail("reason", now)
+        for index in range(23)
+    ]
+    with app.state.session_factory() as session:
+        repository = SqlAlchemyScanRepository(session)
+        for scan in reversed(scans):
+            repository.add(scan)
+        session.commit()
+    response = client.get(f"/targets/{target['id']}/scans", headers=headers)
+    assert response.status_code == 200
+    assert [row["id"] for row in response.json()] == [str(scan.id) for scan in scans[:20]]
+
+
+def test_target_history_requires_owner(client, headers, target):
+    path = f"/targets/{target['id']}/scans"
+    assert client.get(path).status_code == 401
+    other = auth_headers(client, "other@example.test")
+    hidden = client.get(path, headers=other)
+    missing = client.get(f"/targets/{uuid.uuid4()}/scans", headers=other)
+    assert hidden.status_code == missing.status_code == 404
+    assert hidden.json() == missing.json()

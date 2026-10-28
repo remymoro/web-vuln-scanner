@@ -58,6 +58,15 @@ class SqlAlchemyScanRepository:
         )
         return None if model is None else _to_domain(model)
 
+    def list_for_target(self, target_id: uuid.UUID) -> list[Scan]:
+        models = self._session.scalars(
+            select(ScanModel)
+            .where(ScanModel.target_id == target_id)
+            .order_by(ScanModel.created_at.desc(), ScanModel.id.desc())
+            .limit(20)
+        )
+        return [_to_domain(model) for model in models]
+
     def list_for_target_since(self, target_id: uuid.UUID, since: datetime) -> list[Scan]:
         models = self._session.scalars(
             select(ScanModel)

@@ -1,4 +1,5 @@
 import uuid
+from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
@@ -7,6 +8,7 @@ from pydantic import BaseModel, field_validator
 
 from app.api.auth import CurrentUserDep
 from app.api.deps import SessionDep
+from app.api.scans import ScanResponse
 from app.domain.ports import TxtRecordResolver
 from app.domain.targets import (
     DnsLookupError,
@@ -18,6 +20,7 @@ from app.domain.targets import (
     register_target,
     verify_target,
 )
+from app.infra.scan_repository import SqlAlchemyScanRepository
 from app.infra.target_repository import SqlAlchemyTargetRepository
 
 router = APIRouter(prefix="/targets", tags=["targets"])
@@ -86,6 +89,17 @@ def get_target(target_id: uuid.UUID, session: SessionDep, user: CurrentUserDep) 
     if target is None or target.user_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Target not found")
     return _to_response(target)
+
+
+@router.get("/{target_id}/scans")
+def list_target_scans(
+    target_id: uuid.UUID, session: SessionDep, user: CurrentUserDep
+) -> list[ScanResponse]:
+    target = SqlAlchemyTargetRepository(session).get(target_id)
+    if target is None or target.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Target not found")
+    scans = SqlAlchemyScanRepository(session).list_for_target(target_id)
+    return [ScanResponse(**asdict(scan)) for scan in scans]
 
 
 @router.post("/{target_id}/verify")
