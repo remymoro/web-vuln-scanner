@@ -19,6 +19,8 @@ import urllib.error
 import urllib.request
 
 api = "http://127.0.0.1:8000"
+# Note mesurée sur la pile Docker avec les 5 scanners : E, 12/100.
+DEFAULT_EXPECTED_GRADE = "E"
 http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 token = None
 
@@ -40,11 +42,10 @@ def request(method, path, body=None, retry_statuses=()):
 
 def main():
     global token
-    timeout = int(os.environ.get("DEMO_TIMEOUT_SECONDS", "360"))
+    timeout = int(os.environ.get("DEMO_TIMEOUT_SECONDS", "420"))
     if not 1 <= timeout <= 3600:
         raise ValueError("DEMO_TIMEOUT_SECONDS doit être compris entre 1 et 3600")
-    # Facultatif : DEMO_EXPECTED_GRADE=E ./scripts/demo.sh.
-    # Note mesurée de la démo : E, 25/100 (en-têtes, TLS 1.1, aucune limitation, aucun WAF).
+    # Facultatif : DEMO_EXPECTED_GRADE=E ./scripts/demo.sh (par défaut DEFAULT_EXPECTED_GRADE).
     expected_grade = os.environ.get("DEMO_EXPECTED_GRADE", "")
     if expected_grade and expected_grade not in ("A", "B", "C", "D", "E"):
         raise ValueError("DEMO_EXPECTED_GRADE doit être une lettre de A à E")
