@@ -80,3 +80,39 @@ def test_invalid_configuration_prevents_startup(monkeypatch, tmp_path):
             create_app()
     finally:
         get_settings.cache_clear()
+
+
+@pytest.mark.parametrize("app_env", ["production", "test", "development"])
+def test_factory_passes_explicit_nameservers(settings, app_env):
+    from ipaddress import ip_address
+
+    settings = settings.model_copy(
+        update={"app_env": app_env, "dns_nameservers": [ip_address("172.30.53.53")]}
+    )
+    resolver = create_app(settings).state.txt_resolver
+    assert resolver._resolver.nameservers == ["172.30.53.53"]
+
+
+@pytest.mark.parametrize("app_env", ["production", "test"])
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("DEV_SSRF_ALLOWED_HOSTS", '["demo.scanner.test"]'),
+        ("DEV_EXTRA_CA_FILE", "/certs/ca.crt"),
+    ],
+)
+def test_demo_configuration_prevents_api_startup(monkeypatch, tmp_path, app_env, name, value):
+    from app.config import get_settings
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://x:y@localhost/z")
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6380/0")
+    monkeypatch.setenv("JWT_SECRET", "t" * 32)
+    monkeypatch.setenv("APP_ENV", app_env)
+    monkeypatch.setenv(name, value)
+    get_settings.cache_clear()
+    try:
+        with pytest.raises(ValidationError, match="app_env=development"):
+            create_app()
+    finally:
+        get_settings.cache_clear()

@@ -105,4 +105,4 @@ depuis la création du précédent. Les échecs dus à notre infrastructure (`qu
 - Tests unitaires sur la notation et chaque scanner (réponses HTTP simulées).
 - Tests dédiés à la garde anti-SSRF : IP privées, redirections, rebinding.
 - Exceptions métier dédiées. Plus tard : logs structurés.
-- CI GitHub Actions : `uv sync --locked`, ruff (lint et format) et pytest avec PostgreSQL et Redis 7 de service. Tests de bout en bout avec `SimpleWorker`, scanners factices et timeout réel ; aucun accès Internet. Aucune image n'est construite pour l'instant.
+- CI GitHub Actions : `uv sync --locked`, ruff (lint et format) et pytest avec PostgreSQL et Redis 7 de service. Tests de bout en bout avec `SimpleWorker`, scanners factices et timeout réel ; aucun accès Internet. Un job séparé construit l'image Docker backend sans la publier.

@@ -13,8 +13,15 @@ class DnspythonTxtResolver:
         *,
         timeout: float = 3.0,
         lifetime: float = 5.0,
+        nameservers: list[str] | None = None,
     ) -> None:
-        self._resolver = resolver if resolver is not None else dns.resolver.Resolver()
+        self._resolver = (
+            resolver
+            if resolver is not None
+            else dns.resolver.Resolver(configure=nameservers is None)
+        )
+        if nameservers is not None:
+            self._resolver.nameservers = nameservers
         self._resolver.timeout = timeout
         self._resolver.lifetime = lifetime
 

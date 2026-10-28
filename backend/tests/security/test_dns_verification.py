@@ -38,6 +38,27 @@ def test_timeout_and_lifetime_are_configurable():
     assert fake.lifetime == 2.0
 
 
+def test_explicit_nameservers_replace_system_configuration(monkeypatch):
+    fake = FakeResolver()
+    calls = []
+
+    def build_resolver(*, configure):
+        calls.append(configure)
+        return fake
+
+    monkeypatch.setattr(dns.resolver, "Resolver", build_resolver)
+    DnspythonTxtResolver(nameservers=["172.30.53.53"])
+    assert calls == [False]
+    assert fake.nameservers == ["172.30.53.53"]
+
+
+def test_default_nameservers_preserve_system_configuration():
+    fake = FakeResolver()
+    fake.nameservers = ["1.1.1.1"]
+    DnspythonTxtResolver(fake)
+    assert fake.nameservers == ["1.1.1.1"]
+
+
 @pytest.mark.parametrize("error", [None, dns.resolver.NXDOMAIN(), dns.resolver.NoAnswer()])
 def test_absent_txt_returns_empty_list(error):
     assert DnspythonTxtResolver(FakeResolver(error=error)).txt_records("example.com") == []

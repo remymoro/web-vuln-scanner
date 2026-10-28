@@ -1,0 +1,8 @@
+FROM coredns/coredns:1.12.4 AS coredns
+FROM alpine:3.22.2
+COPY --from=coredns /coredns /usr/local/bin/coredns
+COPY Corefile /etc/coredns/Corefile
+COPY scanner.test.zone /etc/coredns/scanner.test.zone
+COPY start-dns.sh /usr/local/bin/start-dns.sh
+ENTRYPOINT ["/bin/sh", "/usr/local/bin/start-dns.sh"]
+CMD ["-conf", "/etc/coredns/Corefile"]

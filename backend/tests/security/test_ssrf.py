@@ -1,6 +1,8 @@
 import ipaddress
+import shutil
 import socket
 import ssl
+import subprocess
 
 import httpcore
 import httpx
@@ -396,3 +398,139 @@ def test_negative_redirect_limit_makes_no_request(dns):
         with pytest.raises(SsrfBlockedError, match="[Rr]edirect"):
             safe_get(client, "http://example.test/", max_redirects=-1)
     assert dns[1] == []
+
+
+@pytest.mark.parametrize("address", ["10.0.0.1", "172.16.0.1", "192.168.1.1", "fc00::1"])
+@pytest.mark.parametrize("direct", [False, True])
+def test_exact_demo_host_can_connect_to_private_ip(dns, address, direct):
+    dns[0]["example.test"] = [address]
+    wrapped = FakeBackend()
+    with _create_safe_client(network_backend=wrapped, allowed_hosts=["example.test"]) as client:
+        response = (
+            client.get("https://example.test/")
+            if direct
+            else safe_get(client, "https://example.test/")
+        )
+        assert response.text == "OK"
+    assert wrapped.calls[0][:2] == (address, 443)
+    context, hostname = wrapped.streams[0].tls
+    assert hostname == "example.test"
+    assert context.check_hostname
+    assert context.verify_mode == ssl.CERT_REQUIRED
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        "127.0.0.1",
+        "169.254.169.254",
+        "::1",
+        "fe80::1",
+        "fec0::1",
+        "100.64.0.1",
+        "224.0.0.1",
+        "ff0e::1",
+        "0.0.0.0",
+        "::",
+        "240.0.0.1",
+        "192.0.2.1",
+        "::ffff:10.0.0.1",
+        "2002:0a00:0001::1",
+        "64:ff9b::a00:1",
+        "2001:0:a00:1:0:0:fefe:fefe",
+    ],
+)
+def test_demo_exception_never_allows_other_nonpublic_addresses(dns, address):
+    dns[0]["example.test"] = [address]
+    wrapped = FakeBackend()
+    with _create_safe_client(network_backend=wrapped, allowed_hosts=["example.test"]) as client:
+        with pytest.raises(SsrfBlockedError):
+            client.get("https://example.test/")
+    assert wrapped.calls == []
+
+
+@pytest.mark.parametrize("host", ["other.test", "sub.example.test", "example.test."])
+def test_demo_exception_is_exact_and_not_inherited(dns, host):
+    dns[0][host] = ["10.0.0.1"]
+    wrapped = FakeBackend()
+    with _create_safe_client(network_backend=wrapped, allowed_hosts=["example.test"]) as client:
+        with pytest.raises(SsrfBlockedError):
+            safe_get(client, f"http://{host}/")
+    assert wrapped.calls == []
+
+
+def test_demo_mixed_dns_answer_blocks_whole_destination(dns):
+    dns[0]["example.test"] = ["10.0.0.1", "169.254.169.254"]
+    wrapped = FakeBackend()
+    with pytest.raises(SsrfBlockedError):
+        GuardedNetworkBackend(wrapped, allowed_hosts=["example.test"]).connect_tcp(
+            "example.test", 80
+        )
+    assert wrapped.calls == []
+
+
+def test_demo_redirect_to_another_private_host_is_blocked(dns):
+    dns[0]["example.test"] = ["10.0.0.1"]
+    dns[0]["other.test"] = ["10.0.0.2"]
+
+    class RedirectBackend(FakeBackend):
+        def connect_tcp(self, *args, **kwargs):
+            stream = super().connect_tcp(*args, **kwargs)
+            stream.data = (
+                b"HTTP/1.1 302 Found\r\nLocation: http://other.test/\r\nContent-Length: 0\r\n\r\n"
+            )
+            return stream
+
+    wrapped = RedirectBackend()
+    with _create_safe_client(network_backend=wrapped, allowed_hosts=["example.test"]) as client:
+        with pytest.raises(SsrfBlockedError, match="other.test"):
+            safe_get(client, "http://example.test/")
+    assert [call[:2] for call in wrapped.calls] == [("10.0.0.1", 80)]
+
+
+@pytest.mark.skipif(shutil.which("openssl") is None, reason="openssl absent")
+def test_extra_ca_extends_verified_context_and_ignores_environment(tmp_path, monkeypatch):
+    ca = tmp_path / "ca.crt"
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-noenc",
+            "-days",
+            "1",
+            "-subj",
+            "/CN=Scanner test CA",
+            "-keyout",
+            str(tmp_path / "ca.key"),
+            "-out",
+            str(ca),
+            "-addext",
+            "basicConstraints=critical,CA:TRUE",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    monkeypatch.setenv("SSL_CERT_FILE", str(tmp_path / "missing.crt"))
+    monkeypatch.setenv("SSL_CERT_DIR", str(tmp_path / "missing"))
+    baseline = FakeBackend()
+    with _create_safe_client(network_backend=baseline) as client:
+        client.get("https://example.test/")
+    original_roots = baseline.streams[0].tls[0].get_ca_certs(binary_form=True)
+    wrapped = FakeBackend()
+    with _create_safe_client(network_backend=wrapped, extra_ca_file=ca) as client:
+        client.get("https://example.test/")
+    context, hostname = wrapped.streams[0].tls
+    roots = context.get_ca_certs(binary_form=True)
+    assert set(original_roots) < set(roots)
+    assert ssl.PEM_cert_to_DER_cert(ca.read_text()) in roots
+    assert context.check_hostname
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert hostname == "example.test"
+
+
+def test_extra_ca_missing_file_is_not_ignored(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        create_safe_client(extra_ca_file=tmp_path / "missing.crt")

@@ -50,10 +50,16 @@ def get_worker_sessions() -> sessionmaker[Session]:
 
 
 def build_worker_runtime() -> WorkerRuntime:
+    settings = get_settings()
     sessions = get_worker_sessions()
     policy = load_scoring_policy(CONFIG_DIR / "scoring.yaml")
     rules = load_header_rules(CONFIG_DIR / "header_rules.yaml")
-    client = create_safe_client()
+    client = create_safe_client(
+        allowed_hosts=(
+            settings.dev_ssrf_allowed_hosts if settings.app_env == "development" else ()
+        ),
+        extra_ca_file=(settings.dev_extra_ca_file if settings.app_env == "development" else None),
+    )
     atexit.register(client.close)
     registry = ScannerRegistry()
     registry.register(HeadersScanner(client, rules))
