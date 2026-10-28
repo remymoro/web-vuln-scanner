@@ -12,10 +12,12 @@ from app.infra.header_rules_config import load_header_rules
 from app.infra.ratelimit_rules_config import load_ratelimit_rules
 from app.infra.scanners_config import ScannerConfig
 from app.infra.tls_rules_config import load_tls_rules
+from app.infra.waf_rules_config import load_waf_rules
 from app.scanners.headers import HeadersScanner
 from app.scanners.ratelimit import RateLimitScanner, validate_burst_options
 from app.scanners.registry import ScannerRegistry
 from app.scanners.tls import TlsScanner
+from app.scanners.waf import WafScanner
 
 ENTRY_POINT_GROUP = "web_vuln_scanner.scanners"
 
@@ -84,10 +86,25 @@ def _ratelimit(context: ScannerContext) -> Scanner:
     )
 
 
+def _waf(context: ScannerContext) -> Scanner:
+    from app.scanners.wafw00f_probe import Wafw00fProbe
+
+    if context.options.keys() - {"rules", "network_timeout"}:
+        raise ValueError("Unknown waf option; expected rules, network_timeout")
+    rules = context.options.get("rules", "waf_rules.yaml")
+    if not isinstance(rules, str) or not rules.strip():
+        raise ValueError("waf rules must be a non-empty path")
+    return WafScanner(
+        Wafw00fProbe(context.client, network_timeout=context.options.get("network_timeout", 3)),
+        load_waf_rules(context.config_dir / rules),
+    )
+
+
 BUILTIN_FACTORIES: dict[str, Callable[[ScannerContext], Scanner]] = {
     "headers": _headers,
     "tls": _tls,
     "ratelimit": _ratelimit,
+    "waf": _waf,
 }
 
 

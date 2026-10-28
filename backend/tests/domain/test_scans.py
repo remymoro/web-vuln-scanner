@@ -349,6 +349,36 @@ def test_all_failed_scanners_fail_the_scan(scans, targets, pending):
     assert not is_partial(scans.get_scanner_runs(pending.id))
 
 
+def test_waf_network_failure_leaves_category_unevaluated(scans, targets, pending):
+    import httpx
+    import respx
+
+    from app.infra.waf_rules_config import load_waf_rules
+    from app.scanners.waf import WafScanner
+    from app.scanners.wafw00f_probe import Wafw00fProbe
+    from app.security.ssrf import create_safe_client
+    from app.workers.jobs import CONFIG_DIR
+
+    with respx.mock(assert_all_called=True) as router:
+        router.get("https://example.com/").mock(side_effect=httpx.ConnectError("unreachable"))
+        with create_safe_client() as client:
+            waf = WafScanner(Wafw00fProbe(client), load_waf_rules(CONFIG_DIR / "waf_rules.yaml"))
+            done = execute(scans, targets, pending.id, [waf, FakeScanner()])
+    runs = scans.get_scanner_runs(done.id)
+    assert done.status is ScanStatus.DONE
+    assert done.score == 100
+    assert is_partial(runs)
+    assert runs[0].scanner == "waf"
+    assert runs[0].status == "error"
+    assert runs[0].error == "ConnectError"
+    assert scans.get_findings(done.id) == []
+    report = score([], DEFAULT_POLICY, runs)
+    category = next(c for c in report.categories if c.category == "Pare-feu applicatif")
+    assert category.score is None
+    assert category.grade is None
+    assert category.deductions == ()
+
+
 def test_invalid_scanner_output_is_isolated(scans, targets, pending):
     done = execute(
         scans,

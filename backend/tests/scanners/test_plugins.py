@@ -257,3 +257,68 @@ def test_ratelimit_factory_uses_default_rules_file(monkeypatch):
     with create_safe_client() as client:
         (scanner,) = load_scanners([ScannerConfig("ratelimit", {})], client, config_dir)
     assert (scanner.name, scanner.category) == ("ratelimit", "Limitation de débit")
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"unknown": True},
+        {"rules": ""},
+        {"rules": " "},
+        {"rules": 5},
+        {"rules": True},
+        {"network_timeout": True},
+        {"network_timeout": False},
+        {"network_timeout": 0},
+        {"network_timeout": 11},
+        {"network_timeout": 3.0},
+        {"network_timeout": "3"},
+        {"network_timeout": None},
+    ],
+)
+def test_waf_options_are_validated(monkeypatch, tmp_path, options):
+    discover(monkeypatch)
+    with pytest.raises(ValueError, match="waf"):
+        load_scanners([ScannerConfig("waf", options)], Mock(), tmp_path)
+
+
+@pytest.mark.parametrize("timeout", [1, 3, 10])
+def test_waf_factory_receives_context_client_timeout_and_relative_rules(
+    monkeypatch, tmp_path, timeout
+):
+    from app.infra.waf_rules_config import load_waf_rules
+    from app.scanners import wafw00f_probe
+
+    discover(monkeypatch)
+    config_dir = Path(__file__).resolve().parents[2] / "config"
+    (tmp_path / "custom.yaml").write_text((config_dir / "waf_rules.yaml").read_text())
+    factory = Mock(wraps=wafw00f_probe.Wafw00fProbe)
+    scanner_factory = Mock(wraps=plugins.WafScanner)
+    monkeypatch.setattr(wafw00f_probe, "Wafw00fProbe", factory)
+    monkeypatch.setattr(plugins, "WafScanner", scanner_factory)
+    with respx.mock(assert_all_called=True) as router:
+        route = router.get(host="example.test").respond(200, headers={"server": "cloudflare"})
+        with create_safe_client() as client:
+            (scanner,) = load_scanners(
+                [ScannerConfig("waf", {"rules": "custom.yaml", "network_timeout": timeout})],
+                client,
+                tmp_path,
+            )
+            factory.assert_called_once_with(client, network_timeout=timeout)
+            assert scanner_factory.call_args.args[1] == load_waf_rules(tmp_path / "custom.yaml")
+            assert scanner.run(Target("https://example.test/"))[0].id == "waf.detected"
+            assert not client.is_closed
+        assert route.call_count == 2
+
+
+def test_waf_factory_defaults(monkeypatch):
+    from app.scanners import wafw00f_probe
+
+    discover(monkeypatch)
+    factory = Mock(wraps=wafw00f_probe.Wafw00fProbe)
+    monkeypatch.setattr(wafw00f_probe, "Wafw00fProbe", factory)
+    config_dir = Path(__file__).resolve().parents[2] / "config"
+    with create_safe_client() as client:
+        (scanner,) = load_scanners([ScannerConfig("waf", {})], client, config_dir)
+        factory.assert_called_once_with(client, network_timeout=3)
+    assert (scanner.name, scanner.category) == ("waf", "Pare-feu applicatif")
