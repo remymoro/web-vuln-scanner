@@ -1,0 +1,4 @@
+scanners:
+  - name: headers
+    options:
+      rules: header_rules.yaml

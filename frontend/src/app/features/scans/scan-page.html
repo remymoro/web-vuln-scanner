@@ -8,6 +8,10 @@
   @if (scan.hasValue()) {
     @let state = scan.value();
     <p class="scan-state" role="status">{{ statusLabels[state.status] }}</p>
+    @if (state.partial) {
+      <p><strong class="badge severity-medium">Rapport partiel</strong></p>
+      <p>La note porte uniquement sur les catégories évaluées.</p>
+    }
     <p>Demandé le {{ state.created_at | date: 'dd/MM/yyyy à HH:mm:ss' }}</p>
     @if (state.status === 'pending' || state.status === 'running') {
       <p>Le suivi est actualisé toutes les 2 secondes.</p>
@@ -16,6 +20,23 @@
       <p class="error" role="alert">
         Le scan a échoué. Motif : {{ state.error ?? 'Motif non précisé' }}
       </p>
+    }
+    @if (state.scanners.length) {
+      <section aria-labelledby="scanners-heading">
+        <h2 id="scanners-heading">Scanners</h2>
+        <ul class="item-list">
+          @for (scanner of state.scanners; track scanner.name) {
+            <li class="list-row">
+              <span>{{ scanner.name }} — {{ scanner.category }}</span>
+              @if (scanner.status === 'ok') {
+                <span>Évalué · {{ scanner.findings_count }} constat(s)</span>
+              } @else {
+                <span>Non évalué : {{ scanner.error ?? 'Motif non précisé' }}</span>
+              }
+            </li>
+          }
+        </ul>
+      </section>
     }
     <a [routerLink]="['/targets', state.target_id]">Revenir au site et à son historique</a>
   } @else if (scan.isLoading()) {
@@ -41,8 +62,12 @@
     <ul class="item-list">
       @for (category of result.categories; track category.category) {
         <li class="list-row">
-          <span>{{ category.category }}</span
-          ><span>{{ category.score }} / 100</span><app-grade-badge [grade]="category.grade" />
+          <span>{{ category.category }}</span>
+          @if (category.score !== null && category.grade !== null) {
+            <span>{{ category.score }} / 100</span><app-grade-badge [grade]="category.grade" />
+          } @else {
+            <span>Non évaluée</span>
+          }
         </li>
       } @empty {
         <li>Aucune catégorie évaluée.</li>

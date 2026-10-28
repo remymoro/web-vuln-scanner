@@ -17,7 +17,7 @@ Une branche à la fois, dans l'ordre. Une branche est terminée quand son critè
 | 9 | `feat/queue-workers` | `POST /scans` (202), job RQ, worker, états pending/running/done/failed, verrou une cible = un scan actif, relances, délai maximum par scan | Test de bout en bout avec Redis de test ; un scan qui dépasse le délai passe à `failed` |
 | 10 | `chore/docker-compose` | Dockerfiles API et worker, compose avec PostgreSQL, Redis (persistance activée), site cible de démo mal configuré | `docker compose up` puis un scan complet de la démo |
 | 11 | `feat/frontend` | Angular : déclaration de cible, vérification, suivi, rapport | Parcours complet dans le navigateur |
-| 12 | `feat/scanner-tls`, `feat/scanner-waf`, `feat/scanner-ratelimit`, `feat/scanner-zap` | Adaptateurs sslyze et wafw00f, rate-limit maison, ZAP en scan passif (conteneur, exploration limitée au domaine vérifié, réseau isolé : voir `security.md`) | Chacun renvoie des `Finding` testés ; ZAP ne joint ni la base, ni Redis, ni les plages privées |
+| 12 | `feat/scanner-plugins`, `feat/scanner-tls`, `feat/scanner-waf`, `feat/scanner-ratelimit`, `feat/scanner-zap` | Plugins configurables, exécutions isolées et rapports partiels ; adaptateurs sslyze et wafw00f, rate-limit maison, ZAP en scan passif (conteneur, exploration limitée au domaine vérifié, réseau isolé : voir `security.md`) | Plugins autorisés uniquement par configuration ; un scanner en échec laisse un rapport partiel ; chacun renvoie des `Finding` testés ; ZAP ne joint ni la base, ni Redis, ni les plages privées |
 | 13 | `feat/k8s`, puis `feat/k8s-keda` | Manifestes dans `deploy/k8s` (Deployments, Services, Secrets), puis ScaledObject KEDA sur la file Redis | Déploiement sur k3s ; les workers montent et descendent selon la file |
 
 ## Dépendances autorisées par branche
@@ -34,6 +34,7 @@ Chaque branche n'ajoute que ce dont elle a besoin. Les contraintes de version so
 | `feat/api-base` | fastapi, uvicorn, pydantic-settings, sqlalchemy, alembic, psycopg, PyJWT, argon2-cffi | API, serveur, configuration, base, migrations, pilote PostgreSQL, jetons, hachage des mots de passe |
 | `feat/targets-dns` | dnspython | Lire l'enregistrement TXT de preuve de propriété |
 | `feat/queue-workers` | redis, rq | Parler à Redis ; gérer la file et les workers |
+| `feat/scanner-plugins` | aucune ; `importlib.metadata` | Découvrir les fabriques des plugins installés, sans importer ceux absents de la liste d’autorisation |
 | `feat/scanner-tls` | sslyze | Analyser la configuration TLS |
 | `feat/scanner-waf` | wafw00f | Détecter le WAF |
 | `feat/scanner-ratelimit` | aucune (httpx déjà présent) | Envoyer une rafale contrôlée |

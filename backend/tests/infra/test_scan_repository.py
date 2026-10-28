@@ -6,11 +6,12 @@ import pytest
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
+from app.domain.scanner_run import ScannerRun
 from app.domain.scans import Scan, ScanAlreadyActiveError, ScanStatus
 from app.domain.scoring import DEFAULT_POLICY, score
 from app.domain.targets import RegisteredTarget
 from app.domain.user import User
-from app.infra.models import FindingModel, ScanModel, TargetModel, UserModel
+from app.infra.models import FindingModel, ScanModel, ScannerRunModel, TargetModel, UserModel
 from app.infra.scan_repository import SqlAlchemyScanRepository
 from app.infra.target_repository import SqlAlchemyTargetRepository
 from app.infra.user_repository import SqlAlchemyUserRepository
@@ -107,15 +108,40 @@ def test_findings_keep_duplicate_rule_ids_and_are_replaced(repository, pending):
     assert repository.get_findings(pending.id) == []
 
 
+def test_scanner_runs_round_trip_and_replacement(repository, pending):
+    ok = ScannerRun("headers", "headers", "ok", None, 1, NOW, NOW)
+    error = ScannerRun("tls", "TLS", "error", "ValueError", 0, NOW, NOW)
+    repository.replace_scanner_runs(pending.id, [ok, error])
+    assert repository.get_scanner_runs(pending.id) == [ok, error]
+    repository.replace_scanner_runs(pending.id, [ok])
+    assert repository.get_scanner_runs(pending.id) == [ok]
+    repository.replace_scanner_runs(pending.id, [])
+    assert repository.get_scanner_runs(pending.id) == []
+    assert repository.get_scanner_runs(uuid.uuid4()) == []
+
+
+def test_scanner_names_are_unique_per_scan(repository, pending, db_session):
+    run = ScannerRun("headers", "headers", "ok", None, 0, NOW, NOW)
+    with pytest.raises(IntegrityError, match="uq_scanner_runs_scan_id_scanner"):
+        with db_session.begin_nested():
+            repository.replace_scanner_runs(pending.id, [run, run])
+    assert repository.get(pending.id) == pending
+
+
 @pytest.mark.parametrize("parent", [UserModel, TargetModel, ScanModel])
 def test_cascades_remove_scans_and_findings(repository, target, pending, db_session, parent):
     repository.replace_findings(pending.id, [FINDING])
+    repository.replace_scanner_runs(
+        pending.id, [ScannerRun("headers", "headers", "ok", None, 1, NOW, NOW)]
+    )
     identifier = {UserModel: target.user_id, TargetModel: target.id, ScanModel: pending.id}[parent]
     db_session.execute(delete(parent).where(parent.id == identifier))
     db_session.expire_all()
     assert repository.get(pending.id) is None
     assert repository.get_findings(pending.id) == []
     assert db_session.scalars(select(FindingModel)).all() == []
+    assert repository.get_scanner_runs(pending.id) == []
+    assert db_session.scalars(select(ScannerRunModel)).all() == []
 
 
 def test_scan_defaults_are_filled(target, db_session):
@@ -133,9 +159,13 @@ def test_repository_mutations_never_commit(repository, target, db_session):
     repository.add(scan)
     repository.save(scan.start(NOW))
     repository.replace_findings(scan.id, [FINDING])
+    repository.replace_scanner_runs(
+        scan.id, [ScannerRun("headers", "headers", "ok", None, 1, NOW, NOW)]
+    )
     db_session.rollback()
     assert repository.get(scan.id) is None
     assert repository.get_findings(scan.id) == []
+    assert repository.get_scanner_runs(scan.id) == []
 
 
 def test_list_for_target_since_filters_by_target_and_date(repository, pending, target, db_session):

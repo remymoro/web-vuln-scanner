@@ -97,7 +97,7 @@ uv run uvicorn app.api.main:create_app --factory --reload
 
 Documentation interactive : http://127.0.0.1:8000/docs
 
-Dans un autre terminal, depuis `backend/`, exporter `REDIS_URL` puis lancer le worker : `uv run rq worker scans --url "$REDIS_URL"`.
+Dans un autre terminal, depuis `backend/`, exporter `REDIS_URL` puis lancer le worker : `uv run python -m app.workers.jobs`. Ce point d'entrée valide les scanners configurés avant de démarrer RQ, avec le scheduler des relances.
 Ajouter `--with-scheduler` à cette commande pour activer les relances différées (10 puis 30 s).
 
 ## Frontend Angular

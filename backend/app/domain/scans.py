@@ -10,6 +10,8 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from app.domain.finding import Finding
+from app.domain.scanner_run import ScannerRun
 from app.domain.scoring import Grade, ScoreReport, ScoringPolicy, score
 from app.domain.targets import TargetNotFoundError, TargetNotVerifiedError
 
@@ -144,7 +146,6 @@ def execute_scan(
     policy: ScoringPolicy,
     scan_id: uuid.UUID,
     clock: Callable[[], datetime],
-    target_errors: tuple[type[Exception], ...],
     commit: Callable[[], None],
 ) -> Scan:
     scan = scans.get(scan_id)
@@ -154,6 +155,8 @@ def execute_scan(
         return scan
     scan = scan.start(clock())
     scans.save(scan)
+    scans.replace_findings(scan.id, [])
+    scans.replace_scanner_runs(scan.id, [])
     commit()
     target = targets.get(scan.target_id)
     if target is None:
@@ -165,15 +168,44 @@ def execute_scan(
             scan = scan.fail("target not verified", clock())
         else:
             findings = []
-            try:
-                for scanner in scanners:
-                    findings.extend(scanner.run(scan_target))
-            except target_errors as exc:
-                scan = scan.fail(f"target error: {type(exc).__name__}", clock())
-            else:
-                report = score(findings, policy)
-                scans.replace_findings(scan.id, findings)
+            runs = []
+            for scanner in scanners:
+                started_at = clock()
+                try:
+                    scanner_findings = list(scanner.run(scan_target))
+                    if any(not isinstance(finding, Finding) for finding in scanner_findings):
+                        raise TypeError("scanner must return findings")
+                except Exception as exc:
+                    run = ScannerRun(
+                        scanner.name,
+                        scanner.category,
+                        "error",
+                        type(exc).__name__[:100],
+                        0,
+                        started_at,
+                        clock(),
+                    )
+                else:
+                    findings.extend(scanner_findings)
+                    run = ScannerRun(
+                        scanner.name,
+                        scanner.category,
+                        "ok",
+                        None,
+                        len(scanner_findings),
+                        started_at,
+                        clock(),
+                    )
+                runs.append(run)
+            scans.replace_findings(scan.id, findings)
+            scans.replace_scanner_runs(scan.id, runs)
+            if any(run.status == "ok" for run in runs):
+                report = score(findings, policy, runs)
                 scan = scan.complete(report, clock())
+            else:
+                scan = scan.fail(
+                    "all scanners failed" if runs else "no scanners configured", clock()
+                )
     scans.save(scan)
     commit()
     return scan

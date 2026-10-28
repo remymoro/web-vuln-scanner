@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Protocol
 
 from app.domain.finding import Finding
+from app.domain.scanner_run import ScannerRun
 from app.domain.scans import Scan
 from app.domain.target import Target
 from app.domain.targets import RegisteredTarget
@@ -43,7 +44,10 @@ class TxtRecordResolver(Protocol):
 
 
 class Scanner(Protocol):
+    """Respecte son propre délai ; le délai RQ du scan reste le filet de sécurité."""
+
     name: str
+    category: str
 
     def run(self, target: Target) -> list[Finding]: ...
 
@@ -66,6 +70,10 @@ class ScanRepository(Protocol):
     def replace_findings(self, scan_id: uuid.UUID, findings: Iterable[Finding]) -> None: ...
 
     def get_findings(self, scan_id: uuid.UUID) -> list[Finding]: ...
+
+    def replace_scanner_runs(self, scan_id: uuid.UUID, runs: Iterable[ScannerRun]) -> None: ...
+
+    def get_scanner_runs(self, scan_id: uuid.UUID) -> list[ScannerRun]: ...
 
 
 class ScanQueue(Protocol):

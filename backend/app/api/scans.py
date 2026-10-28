@@ -1,6 +1,7 @@
 import uuid
 from dataclasses import asdict
 from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
@@ -8,6 +9,7 @@ from pydantic import BaseModel
 from app.api.auth import CurrentUserDep
 from app.api.deps import SessionDep
 from app.domain.finding import Finding
+from app.domain.scanner_run import ScannerRun, is_partial
 from app.domain.scans import (
     QueueUnavailableError,
     Scan,
@@ -33,6 +35,27 @@ class RequestedScanResponse(BaseModel):
     status: ScanStatus
 
 
+class ScannerResponse(BaseModel):
+    name: str
+    category: str
+    status: Literal["ok", "error"]
+    error: str | None
+    findings_count: int
+
+
+def _scanner_responses(runs: list[ScannerRun]) -> list[ScannerResponse]:
+    return [
+        ScannerResponse(
+            name=run.scanner,
+            category=run.category,
+            status=run.status,
+            error=run.error,
+            findings_count=run.findings_count,
+        )
+        for run in runs
+    ]
+
+
 class ScanResponse(BaseModel):
     id: uuid.UUID
     target_id: uuid.UUID
@@ -43,6 +66,13 @@ class ScanResponse(BaseModel):
     score: int | None
     grade: Grade | None
     error: str | None
+    partial: bool
+    scanners: list[ScannerResponse]
+
+
+def scan_response(scan: Scan, scans: SqlAlchemyScanRepository) -> ScanResponse:
+    runs = scans.get_scanner_runs(scan.id)
+    return ScanResponse(**asdict(scan), partial=is_partial(runs), scanners=_scanner_responses(runs))
 
 
 class ScanReportResponse(BaseModel):
@@ -51,6 +81,8 @@ class ScanReportResponse(BaseModel):
     categories: tuple[CategoryScore, ...]
     deductions: tuple[Deduction, ...]
     findings: list[Finding]
+    partial: bool
+    scanners: list[ScannerResponse]
 
 
 def _owned_scan(session: SessionDep, user: CurrentUserDep, scan_id: uuid.UUID) -> Scan:
@@ -103,7 +135,7 @@ def request_new_scan(
 
 @router.get("/{scan_id}")
 def get_scan(scan_id: uuid.UUID, session: SessionDep, user: CurrentUserDep) -> ScanResponse:
-    return ScanResponse(**asdict(_owned_scan(session, user, scan_id)))
+    return scan_response(_owned_scan(session, user, scan_id), SqlAlchemyScanRepository(session))
 
 
 @router.get("/{scan_id}/report")
@@ -113,8 +145,10 @@ def get_scan_report(
     scan = _owned_scan(session, user, scan_id)
     if scan.status != ScanStatus.DONE:
         raise HTTPException(status.HTTP_409_CONFLICT, "Scan is not done")
-    findings = SqlAlchemyScanRepository(session).get_findings(scan.id)
-    report = score(findings, request.app.state.scoring_policy)
+    scans = SqlAlchemyScanRepository(session)
+    findings = scans.get_findings(scan.id)
+    runs = scans.get_scanner_runs(scan.id)
+    report = score(findings, request.app.state.scoring_policy, runs or None)
     # Note globale figée à la fin du scan ; le détail est recalculé avec le barème actuel.
     return ScanReportResponse(
         score=scan.score,
@@ -122,4 +156,6 @@ def get_scan_report(
         categories=report.categories,
         deductions=report.deductions,
         findings=findings,
+        partial=is_partial(runs),
+        scanners=_scanner_responses(runs),
     )

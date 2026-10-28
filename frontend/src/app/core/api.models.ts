@@ -44,6 +44,16 @@ export interface Scan extends RequestedScan {
   score: number | null;
   grade: Grade | null;
   error: string | null;
+  partial: boolean;
+  scanners: ScannerRun[];
+}
+
+export interface ScannerRun {
+  name: string;
+  category: string;
+  status: 'ok' | 'error';
+  error: string | null;
+  findings_count: number;
 }
 
 export interface Deduction {
@@ -55,8 +65,8 @@ export interface Deduction {
 
 export interface CategoryScore {
   category: string;
-  score: number;
-  grade: Grade;
+  score: number | null;
+  grade: Grade | null;
   deductions: Deduction[];
 }
 
@@ -72,6 +82,8 @@ export interface Finding {
 }
 
 export interface ScanReport {
+  partial: boolean;
+  scanners: ScannerRun[];
   score: number;
   grade: Grade;
   categories: CategoryScore[];

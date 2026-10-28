@@ -47,4 +47,4 @@ def client(app, migrated_engine):
     with TestClient(app, raise_server_exceptions=False) as test_client:
         yield test_client
     with migrated_engine.begin() as connection:
-        connection.execute(text("TRUNCATE findings, scans, targets, users"))
+        connection.execute(text("TRUNCATE scanner_runs, findings, scans, targets, users"))

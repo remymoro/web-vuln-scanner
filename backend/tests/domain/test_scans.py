@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.domain.finding import Finding, Severity
+from app.domain.scanner_run import ScannerRun, is_partial
 from app.domain.scans import (
     InvalidScanTransitionError,
     Scan,
@@ -28,6 +29,7 @@ class InMemoryScanRepository:
     def __init__(self):
         self.scans = {}
         self.findings = {}
+        self.runs = {}
 
     def add(self, scan):
         self.scans[scan.id] = scan
@@ -60,6 +62,12 @@ class InMemoryScanRepository:
 
     def get_findings(self, scan_id):
         return self.findings.get(scan_id, [])
+
+    def replace_scanner_runs(self, scan_id, runs):
+        self.runs[scan_id] = list(runs)
+
+    def get_scanner_runs(self, scan_id):
+        return self.runs.get(scan_id, [])
 
 
 @pytest.fixture
@@ -260,10 +268,8 @@ def test_abandoned_running_scan_is_failed_and_replaced(targets, scans, target):
     assert scans.get(abandoned.id) == abandoned.fail("abandoned", NOW)
 
 
-def execute(scans, targets, scan_id, scanners=(), commit=lambda: None, target_errors=()):
-    return execute_scan(
-        scans, targets, scanners, DEFAULT_POLICY, scan_id, lambda: NOW, target_errors, commit
-    )
+def execute(scans, targets, scan_id, scanners=(), commit=lambda: None):
+    return execute_scan(scans, targets, scanners, DEFAULT_POLICY, scan_id, lambda: NOW, commit)
 
 
 def test_execution_saves_running_before_scanners_then_report(scans, targets, pending):
@@ -299,30 +305,86 @@ def test_terminal_execution_is_idempotent(scans, targets, pending, status):
 def test_retry_replaces_old_findings(scans, targets, pending):
     scans.save(pending.start(NOW))
     scans.replace_findings(pending.id, [FINDING, FINDING])
+    scans.replace_scanner_runs(pending.id, [ScannerRun("old", "old", "ok", None, 2, NOW, NOW)])
     done = execute(scans, targets, pending.id, [FakeScanner([FINDING])])
     assert done.attempts == 2
     assert scans.get_findings(done.id) == [FINDING]
+    assert [run.scanner for run in scans.get_scanner_runs(done.id)] == ["fake"]
 
 
 def test_multiple_scanners_are_executed(scans, targets, pending):
-    done = execute(scans, targets, pending.id, [FakeScanner([FINDING]), FakeScanner([FINDING])])
+    done = execute(
+        scans,
+        targets,
+        pending.id,
+        [FakeScanner([FINDING]), FakeScanner([replace(FINDING, scanner="other")], name="other")],
+    )
     assert done.score == 80
-    assert scans.get_findings(done.id) == [FINDING, FINDING]
+    assert scans.get_findings(done.id) == [FINDING, replace(FINDING, scanner="other")]
 
 
-def test_target_error_fails_without_retry_or_exposing_details(scans, targets, pending):
-    scanner = FakeScanner(error=ValueError("secret target details"))
-    skipped = FakeScanner()
-    failed = execute(scans, targets, pending.id, [scanner, skipped], target_errors=(ValueError,))
-    assert failed.status == ScanStatus.FAILED
-    assert failed.error == "target error: ValueError"
-    assert skipped.targets == []
+@pytest.mark.parametrize("error", [ValueError("secret target"), RuntimeError("secret plugin bug")])
+def test_scanner_error_is_isolated_without_exposing_details(scans, targets, pending, error):
+    scanner = FakeScanner(error=error, name="broken", category="TLS")
+    following = FakeScanner()
+    done = execute(scans, targets, pending.id, [scanner, following])
+    assert done.status == ScanStatus.DONE
+    assert done.score == 100
+    assert following.targets
+    runs = scans.get_scanner_runs(pending.id)
+    assert is_partial(runs)
+    assert runs == [
+        ScannerRun("broken", "TLS", "error", type(error).__name__, 0, NOW, NOW),
+        ScannerRun("fake", "headers", "ok", None, 0, NOW, NOW),
+    ]
     assert scans.get_findings(pending.id) == []
 
 
-def test_infrastructure_error_propagates_and_leaves_running(scans, targets, pending):
+def test_all_failed_scanners_fail_the_scan(scans, targets, pending):
+    failed = execute(scans, targets, pending.id, [FakeScanner(error=ValueError("secret"))])
+    assert failed.status == ScanStatus.FAILED
+    assert failed.error == "all scanners failed"
+    assert failed.score is None
+    assert scans.get_scanner_runs(pending.id)[0].error == "ValueError"
+    assert not is_partial(scans.get_scanner_runs(pending.id))
+
+
+def test_invalid_scanner_output_is_isolated(scans, targets, pending):
+    done = execute(
+        scans,
+        targets,
+        pending.id,
+        [
+            FakeScanner([None], name="broken"),
+            FakeScanner(),
+        ],
+    )
+    assert done.status == ScanStatus.DONE
+    assert scans.get_scanner_runs(pending.id)[0].error == "TypeError"
+    assert scans.get_findings(pending.id) == []
+
+
+def test_no_scanners_fail_the_scan(scans, targets, pending):
+    failed = execute(scans, targets, pending.id)
+    assert failed.status == ScanStatus.FAILED
+    assert failed.error == "no scanners configured"
+
+
+def test_infrastructure_error_propagates_and_leaves_running(scans, targets, pending, monkeypatch):
+    def broken_storage(*args):
+        raise RuntimeError("database down")
+
+    scanner = FakeScanner()
+    original = scans.replace_scanner_runs
+
+    def fail_on_results(scan_id, runs):
+        if runs:
+            broken_storage()
+        original(scan_id, runs)
+
+    monkeypatch.setattr(scans, "replace_scanner_runs", fail_on_results)
     with pytest.raises(RuntimeError, match="database down"):
-        execute(scans, targets, pending.id, [FakeScanner(error=RuntimeError("database down"))])
+        execute(scans, targets, pending.id, [scanner])
     assert scans.get(pending.id).status == ScanStatus.RUNNING
 
 

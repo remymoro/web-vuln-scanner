@@ -27,8 +27,11 @@ class FakeScanQueue:
 
 class FakeScanner:
     name = "fake"
+    category = "headers"
 
-    def __init__(self, findings=(), error=None, delay=0):
+    def __init__(self, findings=(), error=None, delay=0, name="fake", category="headers"):
+        self.name = name
+        self.category = category
         self.findings = list(findings)
         self.error = error
         self.delay = delay
