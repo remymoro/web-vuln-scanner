@@ -1,0 +1,23 @@
+- id: waf.detected
+  severity: info
+  title: Pare-feu applicatif détecté
+  description: >-
+    Un WAF semble présent ; cette détection n'est jamais certaine et ne garantit
+    pas son efficacité. Les sondes wafw00f envoient des chaînes de type attaque
+    (XSS, SQL, lecture de fichier, etc.) pouvant déclencher les alertes de sécurité
+    du propriétaire du site, dont la propriété a été prouvée par DNS.
+  recommendation: >-
+    Maintenir le WAF et vérifier ses règles ; il complète la sécurité de l'application.
+
+- id: waf.absent
+  severity: low
+  title: Aucun pare-feu applicatif détecté
+  description: >-
+    Un WAF est une défense supplémentaire : son absence n'est pas une faille en soi.
+    La détection n'est jamais certaine ; un WAF discret peut ne pas être reconnu.
+    Les sondes wafw00f envoient des chaînes de type attaque (XSS, SQL, lecture de
+    fichier, etc.) pouvant déclencher les alertes de sécurité du propriétaire du
+    site, dont la propriété a été prouvée par DNS.
+  recommendation: >-
+    Évaluer l'intérêt d'un WAF selon les risques, en complément des corrections
+    de l'application et sans le considérer comme une garantie de sécurité.

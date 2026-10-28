@@ -43,7 +43,8 @@ def main():
     timeout = int(os.environ.get("DEMO_TIMEOUT_SECONDS", "360"))
     if not 1 <= timeout <= 3600:
         raise ValueError("DEMO_TIMEOUT_SECONDS doit être compris entre 1 et 3600")
-    # Facultatif : DEMO_EXPECTED_GRADE=E ./scripts/demo.sh (note mesurée de la démo : E, 28/100).
+    # Facultatif : DEMO_EXPECTED_GRADE=E ./scripts/demo.sh.
+    # Note mesurée de la démo : E, 25/100 (en-têtes, TLS 1.1, aucune limitation, aucun WAF).
     expected_grade = os.environ.get("DEMO_EXPECTED_GRADE", "")
     if expected_grade and expected_grade not in ("A", "B", "C", "D", "E"):
         raise ValueError("DEMO_EXPECTED_GRADE doit être une lettre de A à E")

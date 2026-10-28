@@ -96,6 +96,8 @@ et `network_max_retries` (entier de 0 à 2, défaut 0).
 `ratelimit` accepte `rules` (`ratelimit_rules.yaml` par défaut), `max_requests`
 (entier de 5 à 100, défaut 30) et `max_duration` (entier de 1 à 10 secondes,
 défaut 3). Les booléens sont refusés pour ces options numériques.
+`waf` accepte seulement `rules` (`waf_rules.yaml` par défaut) et `network_timeout`
+(entier de 1 à 10 secondes, défaut 3, booléens refusés).
 
 Les fabriques intégrées sont dans `BUILTIN_FACTORIES` (`scanners/plugins.py`).
 La découverte externe utilise exclusivement la stdlib :
@@ -142,7 +144,7 @@ l’écoute RQ ; le Compose utilise aussi ce point d’entrée.
 
 - `HeadersScanner` : présence et valeur des en-têtes (HSTS avec max-age suffisant, CSP sans `unsafe-inline`, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, cookies Secure/HttpOnly/SameSite). Règles lues depuis un fichier de config, comme les modèles de Nuclei.
 - `TlsScanner` : intégré sous le nom `tls`, catégorie `TLS` (détails ci-dessous).
-- `WafScanner` : wafw00f (bibliothèque importée) — requêtes de test inoffensives et analyse des réponses.
+- `WafScanner` : intégré sous le nom `waf`, catégorie `Pare-feu applicatif` (détails ci-dessous).
 - `RateLimitScanner` : intégré sous le nom `ratelimit`, catégorie `Limitation de débit` (détails ci-dessous).
 - `ZapPassiveScanner` (branche `feat/scanner-zap`) : scan passif ZAP uniquement (pas de scan actif par défaut).
 
@@ -194,6 +196,25 @@ démarrage avec cet identifiant unique. Seule la page d'accueil (URL de la cible
 est testée : d'autres routes, méthodes, identités ou fenêtres de temps peuvent être
 protégées. L'absence de signe dans cette courte rafale ne prouve pas une absence
 générale de limitation. Toute erreur réseau remonte : scanner non évalué, sans pénalité.
+
+### Scanner WAF
+
+`Wafw00fProbe` (`scanners/wafw00f_probe.py`, seul import de wafw00f) sous-classe
+`WAFW00F` et remplace son unique méthode réseau `Request` par le client HTTP
+anti-SSRF du contexte. La version exacte 2.4.2 et la signature parente sont
+vérifiées au démarrage. Aucun appel réseau de `requests` n'est utilisé.
+Les signatures restent intactes ; arrêt au premier nom, puis détection générique
+seulement si aucun nom n'est reconnu : deux à sept GET, plafond strict de sept.
+
+Le résultat gelé `WafReport` alimente l'analyse pure `analyze_waf`.
+`config/waf_rules.yaml` exige les deux règles avec leurs gravités : `waf.detected`
+(`info`, 0 point), preuve « WAF détecté : <noms> » limitée à 1 000 caractères,
+et `waf.absent` (`low`, −3 points). Une détection générique est « non identifié ».
+Une erreur réseau remonte : scanner non évalué, sans constat d'absence ni pénalité.
+Un WAF est une défense supplémentaire : son absence n'est pas une faille en soi,
+la détection est incertaine et sa présence ne prouve pas son efficacité.
+Les descriptions signalent les chaînes de type attaque envoyées par wafw00f
+et les alertes qu'elles peuvent déclencher (voir `security.md`).
 
 ## Notation
 

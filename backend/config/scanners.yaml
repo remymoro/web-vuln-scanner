@@ -12,3 +12,7 @@ scanners:
       max_requests: 30
       max_duration: 3
       rules: ratelimit_rules.yaml
+  - name: waf
+    options:
+      network_timeout: 3
+      rules: waf_rules.yaml
