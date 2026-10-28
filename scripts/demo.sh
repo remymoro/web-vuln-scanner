@@ -43,6 +43,10 @@ def main():
     timeout = int(os.environ.get("DEMO_TIMEOUT_SECONDS", "360"))
     if not 1 <= timeout <= 3600:
         raise ValueError("DEMO_TIMEOUT_SECONDS doit être compris entre 1 et 3600")
+    # Facultatif : DEMO_EXPECTED_GRADE=E ./scripts/demo.sh (note mesurée de la démo : E, 31/100).
+    expected_grade = os.environ.get("DEMO_EXPECTED_GRADE", "")
+    if expected_grade and expected_grade not in ("A", "B", "C", "D", "E"):
+        raise ValueError("DEMO_EXPECTED_GRADE doit être une lettre de A à E")
     credentials = {
         "email": f"demo-{uuid.uuid4().hex}@scanner.test",
         "password": secrets.token_urlsafe(32),
@@ -95,6 +99,8 @@ def main():
         time.sleep(1)
     report = request("GET", f"/scans/{scan['id']}/report")
     print(f"Note : {report['grade']} — {report['score']}/100")
+    if expected_grade and report["grade"] != expected_grade:
+        raise AssertionError(f"Note attendue : {expected_grade}, reçue : {report['grade']}")
     for finding in report["findings"]:
         print(f"- [{finding['severity']}] {finding['title']}")
         print(f"  {finding['evidence']}")

@@ -30,8 +30,10 @@ indépendant (`docker-compose.test.yml`).
   en lecture seule. Les lancements suivants réutilisent les certificats ; un
   certificat serveur expiré est renouvelé. Aucun matériel TLS n'entre dans le dépôt.
 - `demo-site` utilise nginx HTTPS sans HSTS ni X-Content-Type-Options, avec CSP
-  `unsafe-inline` et cookie sans attributs de protection. Seul le scanner d'en-têtes
-  existe à ce stade ; il ne vérifie pas encore les attributs des cookies.
+  `unsafe-inline` et cookie sans attributs de protection. Les scanners `headers`
+  et `tls` sont activés. La démo accepte volontairement TLS 1.1 en plus de TLS 1.2/1.3,
+  avec `@SECLEVEL=0` ; 3DES est proposé si OpenSSL de l'image le fournit encore.
+  Ces réglages ne conviennent qu'à cette cible de démonstration isolée.
 - `demo-dns` utilise CoreDNS épinglé dans Alpine pour disposer des outils de sonde.
   Sa zone `scanner.test` vit dans un volume. Le script y écrit le TXT avec remplacement
   atomique et incrément du numéro SOA ; le plugin `file` recharge sous 2 s, sans
@@ -56,7 +58,21 @@ environnements et ne relâche aucune validation HTTP.
 
 Le conteneur ZAP arrivera avec `feat/scanner-zap`, dans le réseau isolé décrit
 dans `security.md`. Le Compose actuel ne constitue pas le filtrage de sortie
-nécessaire aux outils externes : leurs adaptateurs et règles réseau restent à faire.
+nécessaire aux outils externes vers Internet : leurs règles de sortie restent à faire.
+Le scanner TLS épingle l'IP validée et utilise la CA publique de démo uniquement
+en développement, via les arguments de validation de certificat de sslyze.
+
+La note dépend des protocoles et suites réellement acceptés par l'image nginx.
+`DEMO_EXPECTED_GRADE=E ./scripts/demo.sh` active une vérification facultative de la
+note ; sans cette variable, le script affiche le résultat. Le même réglage surcharge
+l'attente Playwright (`E` par défaut), qui vérifie aussi la catégorie `TLS`.
+Note mesurée sur la pile Docker : E, 31/100 (8 constats d'en-têtes et TLS 1.1 accepté ;
+l'OpenSSL de l'image nginx ne propose plus 3DES).
+
+Après avoir modifié un fichier de `deploy/demo/` (par exemple `nginx.conf`), recréer le
+conteneur : `docker compose up -d --force-recreate demo-site`. Ces fichiers sont montés un par
+un ; un éditeur qui remplace le fichier laisse le conteneur sur l'ancienne version, et un
+simple `docker compose restart` échoue.
 
 ## k3s sur Proxmox (`feat/k8s`)
 

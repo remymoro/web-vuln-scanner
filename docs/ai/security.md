@@ -35,6 +35,13 @@ Ces outils ne peuvent pas utiliser `create_safe_client()`. Appeler `check_url()`
 - s'exécuter dans le réseau isolé décrit plus bas, qui bloque les plages privées même si l'outil se trompe ;
 - pour ZAP en plus : limiter l'exploration au domaine vérifié et n'utiliser que le scan passif.
 
+Le scanner TLS applique cette règle avant tout appel à sslyze :
+`resolve_and_check(host, 443, allowed_hosts=...)` valide toute la réponse DNS, puis
+`ServerNetworkLocation(host, 443, ip_address=ip)` épingle la première IP validée.
+sslyze ne refait pas de DNS et ne reçoit aucun proxy ; le nom est conservé pour
+le SNI et la vérification du certificat. Une IP refusée lève `SsrfBlockedError`
+et donne un scanner `error`. Seules les commandes TLS nécessaires sont activées.
+
 ### Exceptions de démonstration (développement uniquement)
 
 `APP_ENV` vaut `production` par défaut (`development`, `test`, `production` acceptés).
@@ -61,8 +68,12 @@ qu'en développement. Aucune exception n'est activée par défaut.
   c'est un réglage DNS autorisé dans tous les environnements, pas une exception
   anti-SSRF. Il ne change pas la résolution à la connexion du client HTTP.
 
-La preuve de propriété reste obligatoire. Aucun outil externe ne bénéficie de
-ces exceptions : il devra respecter les règles d'épinglage et d'isolation ci-dessus.
+La preuve de propriété reste obligatoire. `ScannerContext` transmet aux outils
+externes les hôtes autorisés (ensemble gelé) et la CA supplémentaire, uniquement
+si `app_env == "development"`, comme au client HTTP. `SslyzeProbe` passe cette CA
+via `CertificateInfoExtraArgument(custom_ca_file=...)` : sslyze ajoute ce magasin
+à ses magasins par défaut. Hors développement, aucune CA ni exception d'hôte
+n'est transmise. L'épinglage et l'isolation restent obligatoires.
 
 ## Plugins de scanners
 
@@ -75,9 +86,10 @@ listé n’est jamais chargé par ce mécanisme.
 
 Sa fabrique reçoit un `ScannerContext` gelé contenant le client créé par
 `create_safe_client()` avec les réglages de démonstration existants. Le plugin
-réutilise ce client anti-SSRF et ne crée pas le sien. Les futurs outils qui ouvrent
-leurs propres connexions restent soumis aux règles d’épinglage et d’isolation
-ci-dessus. Le client partagé est fermé par le worker, pas par le plugin.
+réutilise ce client anti-SSRF et ne crée pas le sien. Les outils qui ouvrent
+leurs propres connexions utilisent les champs `allowed_hosts` et `extra_ca_file`
+du contexte et restent soumis aux règles d’épinglage et d’isolation ci-dessus.
+Le client partagé est fermé par le worker, pas par le plugin.
 
 L’isolation des exceptions protège la disponibilité du rapport, sans rendre un
 plugin non fiable sûr. Le rapport expose uniquement le type d’exception tronqué à
@@ -100,8 +112,9 @@ avec PostgreSQL et Redis sur les deux. Un réseau interne supplémentaire relie
 uniquement worker et site de démo ; un autre relie uniquement API et CoreDNS.
 L’API et le frontend publient leurs ports sur la boucle locale via le réseau non
 interne `edge`. Le réseau interne `web` ne relie que ces deux services. Le worker n'a aucun
-accès à Internet. Le filtrage de sortie des futurs outils externes reste
-à implémenter avant leur activation.
+accès à Internet ; TLS n'y scanne que la démo explicitement autorisée. Le filtrage
+de sortie des plages privées reste à implémenter avant d'ouvrir les scans d'outils
+externes vers Internet.
 
 ## Navigateur et frontend
 

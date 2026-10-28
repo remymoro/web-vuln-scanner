@@ -55,14 +55,13 @@ def build_worker_runtime() -> WorkerRuntime:
     sessions = get_worker_sessions()
     policy = load_scoring_policy(CONFIG_DIR / "scoring.yaml")
     configs = load_scanners_config(CONFIG_DIR / "scanners.yaml")
-    client = create_safe_client(
-        allowed_hosts=(
-            settings.dev_ssrf_allowed_hosts if settings.app_env == "development" else ()
-        ),
-        extra_ca_file=(settings.dev_extra_ca_file if settings.app_env == "development" else None),
-    )
+    allowed_hosts = settings.dev_ssrf_allowed_hosts if settings.app_env == "development" else ()
+    extra_ca_file = settings.dev_extra_ca_file if settings.app_env == "development" else None
+    client = create_safe_client(allowed_hosts=allowed_hosts, extra_ca_file=extra_ca_file)
     try:
-        scanners = load_scanners(configs, client, CONFIG_DIR)
+        scanners = load_scanners(
+            configs, client, CONFIG_DIR, allowed_hosts=allowed_hosts, extra_ca_file=extra_ca_file
+        )
     except BaseException:
         client.close()
         raise

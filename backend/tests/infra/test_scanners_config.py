@@ -8,7 +8,8 @@ from app.infra.scanners_config import load_scanners_config
 def test_shipped_config():
     configs = load_scanners_config(Path(__file__).resolve().parents[2] / "config/scanners.yaml")
     assert [(config.name, dict(config.options)) for config in configs] == [
-        ("headers", {"rules": "header_rules.yaml"})
+        ("headers", {"rules": "header_rules.yaml"}),
+        ("tls", {"rules": "tls_rules.yaml", "network_timeout": 3, "network_max_retries": 0}),
     ]
 
 

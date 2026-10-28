@@ -13,6 +13,8 @@ from tests.fakes import FakeScanner
 
 @pytest.mark.parametrize("app_env", ["development", "test", "production"])
 def test_worker_passes_demo_options_only_in_development(monkeypatch, app_env):
+    from app.scanners import sslyze_probe
+
     settings = Settings(
         _env_file=None,
         database_url="postgresql+psycopg://x:y@localhost/z",
@@ -27,12 +29,25 @@ def test_worker_passes_demo_options_only_in_development(monkeypatch, app_env):
     monkeypatch.setattr(jobs, "get_worker_sessions", Mock())
     monkeypatch.setattr(jobs, "create_safe_client", factory)
     monkeypatch.setattr(jobs.atexit, "register", Mock())
+    probe_factory = Mock()
+    monkeypatch.setattr(sslyze_probe, "SslyzeProbe", probe_factory)
+    load = Mock(wraps=jobs.load_scanners)
+    monkeypatch.setattr(jobs, "load_scanners", load)
     runtime = jobs.build_worker_runtime()
     factory.assert_called_once_with(
         allowed_hosts=["demo.scanner.test"] if app_env == "development" else (),
         extra_ca_file=Path("/certs/ca.crt") if app_env == "development" else None,
     )
-    assert len(runtime.scanners) == 1
+    assert [scanner.name for scanner in runtime.scanners] == ["headers", "tls"]
+    assert load.call_args.kwargs == {
+        "allowed_hosts": ["demo.scanner.test"] if app_env == "development" else (),
+        "extra_ca_file": Path("/certs/ca.crt") if app_env == "development" else None,
+    }
+    probe_factory.assert_called_once_with(
+        network_timeout=3,
+        network_max_retries=0,
+        extra_ca_file=Path("/certs/ca.crt") if app_env == "development" else None,
+    )
 
 
 def test_worker_provides_safe_client_to_plugin(monkeypatch, tmp_path):
@@ -77,7 +92,7 @@ def test_client_is_closed_when_plugin_configuration_fails(monkeypatch):
     client = Mock()
     monkeypatch.setattr(jobs, "create_safe_client", lambda **kwargs: client)
 
-    def invalid_plugin(*args):
+    def invalid_plugin(*args, **kwargs):
         raise ValueError("Invalid Scanner contract")
 
     monkeypatch.setattr(jobs, "load_scanners", invalid_plugin)

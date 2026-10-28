@@ -90,7 +90,9 @@ scanners:
 
 Les clés d’une entrée sont `name` et `options` (mapping facultatif, vide par défaut).
 Les options spécifiques sont validées par la fabrique ; `headers` accepte seulement
-`rules`, un chemin résolu depuis le dossier de configuration.
+`rules`, un chemin résolu depuis le dossier de configuration. `tls` accepte `rules`
+(`tls_rules.yaml` par défaut), `network_timeout` (entier de 1 à 10 secondes, défaut 3)
+et `network_max_retries` (entier de 0 à 2, défaut 0).
 
 Les fabriques intégrées sont dans `BUILTIN_FACTORIES` (`scanners/plugins.py`).
 La découverte externe utilise exclusivement la stdlib :
@@ -118,7 +120,10 @@ def build_scanner(context: ScannerContext):
 `run(target: Target) -> list[Finding]`. Ses constats portent le même nom de scanner
 et sa catégorie. Ajouter ensuite `{name: example, options: {}}` au YAML.
 Le contexte gelé fournit `client` (client anti-SSRF créé par le worker), `config_dir`
-(`Path`) et `options` (mapping copié, non modifiable au premier niveau). Il ne crée
+(`Path`), `options` (mapping copié, non modifiable au premier niveau), `allowed_hosts`
+(`frozenset` copié) et `extra_ca_file` (`Path | None`). Les deux derniers champs sont
+vides hors développement et servent aux outils qui ouvrent leurs propres connexions.
+Un scanner HTTP ne crée
 pas de client HTTP ; il réutilise celui du contexte et respecte ses protections.
 Les valeurs imbriquées des options doivent être traitées comme de la configuration,
 sans les modifier.
@@ -133,12 +138,40 @@ l’écoute RQ ; le Compose utilise aussi ce point d’entrée.
 ## Scanners prévus
 
 - `HeadersScanner` : présence et valeur des en-têtes (HSTS avec max-age suffisant, CSP sans `unsafe-inline`, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, cookies Secure/HttpOnly/SameSite). Règles lues depuis un fichier de config, comme les modèles de Nuclei.
-- `TlsScanner` : sslyze (bibliothèque importée) — versions de protocole, suites de chiffrement, certificat.
+- `TlsScanner` : intégré sous le nom `tls`, catégorie `TLS` (détails ci-dessous).
 - `WafScanner` : wafw00f (bibliothèque importée) — requêtes de test inoffensives et analyse des réponses.
 - `RateLimitScanner` : code maison, rafale contrôlée et limitée, détection des réponses 429.
 - `ZapPassiveScanner` (branche `feat/scanner-zap`) : scan passif ZAP uniquement (pas de scan actif par défaut).
 
 Écartés : API hébergées (SSL Labs, Mozilla Observatory : quotas, c'est leur serveur qui scanne), testssl.sh (doublon de sslyze), Nikto (bruyant, daté). Wapiti et Nuclei : plus tard, sites vérifiés uniquement.
+
+### Scanner TLS
+
+Deux couches : `SslyzeProbe` (`scanners/sslyze_probe.py`, seul import de sslyze) traduit
+les résultats en `TlsReport`, `TlsCertificate` et `TlsWeakCipher` gelés ;
+`analyze_tls(report, rules)` est pure, avec la date d'observation dans le rapport.
+`TlsScanner` résout et valide toutes les IP avant la sonde, puis scanne uniquement
+la première IP validée, sur le port 443 du nom extrait de `Target.url`, même en HTTP.
+
+`config/tls_rules.yaml` définit 13 contrôles et leurs identifiants stables `tls.*` :
+SSL 2.0/3.0 (high), TLS 1.0/1.1 (medium), absence de TLS 1.3 (low), suites RC4/3DES/
+NULL/EXPORT/anonymes ou clés symétriques < 128 bits (high), certificat expiré,
+nom incorrect, chaîne non validée (high), expiration dans strictement moins de
+30 jours (medium), Heartbleed, ROBOT (oracle faible ou fort) et CCS injection (high).
+Un certificat expiré ne reçoit pas aussi le constat d'expiration prochaine.
+
+Un constat par règle : les suites faibles sont regroupées avec leurs protocoles,
+preuve limitée à 1 000 caractères ; pour les certificats multiples, le premier
+déploiement fautif est cité. Le nom est contrôlé dans les SAN (joker complet sur
+une étiquette, aucun repli sur CN). La validation de chaîne de sslyze inclut aussi
+le nom et la date : un certificat expiré ou de mauvais nom peut donc produire
+également `tls.certificate.untrusted`.
+
+Une connexion impossible, un contrôle sslyze en erreur, l'absence de certificat ou
+un résultat ROBOT indéterminé produisent `TlsProbeError`, donc un run `error`, sans
+constats ni pénalité TLS. Cela évite de noter une analyse incomplète comme saine.
+Le délai réseau et les relances bornent chaque connexion ; le délai global RQ
+reste la limite de durée de l'ensemble du scan.
 
 ## Notation
 

@@ -1,0 +1,92 @@
+# Un constat par règle, même si plusieurs certificats ou suites sont concernés.
+- id: tls.protocol.ssl_2_0
+  check: ssl_2_0
+  severity: high
+  title: SSL 2.0 accepté
+  description: SSL 2.0 est obsolète et vulnérable.
+  recommendation: Désactiver SSL 2.0 sur le serveur.
+
+- id: tls.protocol.ssl_3_0
+  check: ssl_3_0
+  severity: high
+  title: SSL 3.0 accepté
+  description: SSL 3.0 est obsolète et vulnérable.
+  recommendation: Désactiver SSL 3.0 sur le serveur.
+
+- id: tls.protocol.tls_1_0
+  check: tls_1_0
+  severity: medium
+  title: TLS 1.0 accepté
+  description: TLS 1.0 ne fournit plus les protections attendues.
+  recommendation: Désactiver TLS 1.0 et conserver TLS 1.2 et TLS 1.3.
+
+- id: tls.protocol.tls_1_1
+  check: tls_1_1
+  severity: medium
+  title: TLS 1.1 accepté
+  description: TLS 1.1 ne fournit plus les protections attendues.
+  recommendation: Désactiver TLS 1.1 et conserver TLS 1.2 et TLS 1.3.
+
+- id: tls.protocol.tls_1_3_missing
+  check: tls_1_3_missing
+  severity: low
+  title: TLS 1.3 absent
+  description: TLS 1.3 apporte des protections et des performances supplémentaires.
+  recommendation: Activer TLS 1.3 sur le serveur.
+
+- id: tls.weak_ciphers
+  check: weak_ciphers
+  severity: high
+  title: Suites de chiffrement faibles acceptées
+  description: RC4, 3DES, NULL, EXPORT, les suites anonymes et les clés de moins de 128 bits sont faibles.
+  recommendation: Désactiver ces suites et utiliser un chiffrement authentifié moderne.
+
+- id: tls.certificate.expired
+  check: certificate_expired
+  severity: high
+  title: Certificat expiré
+  description: Un certificat expiré ne permet plus une authentification valide du serveur.
+  recommendation: Renouveler le certificat et automatiser son renouvellement.
+
+- id: tls.certificate.hostname
+  check: certificate_hostname
+  severity: high
+  title: Nom du certificat incorrect
+  description: Le certificat ne correspond pas au nom de domaine scanné.
+  recommendation: Installer un certificat dont le SAN contient le nom de domaine exact.
+
+- id: tls.certificate.untrusted
+  check: certificate_untrusted
+  severity: high
+  title: Chaîne du certificat non reconnue
+  description: Aucun magasin de confiance utilisé ne valide la chaîne et son identité à la date du scan.
+  recommendation: Installer un certificat valide et fournir les certificats intermédiaires nécessaires.
+
+- id: tls.certificate.expiring
+  check: certificate_expiring
+  severity: medium
+  title: Expiration prochaine du certificat
+  description: Un certificat proche de son expiration risque d'interrompre l'accès au site.
+  recommendation: Renouveler le certificat avant son expiration et automatiser son renouvellement.
+  days: 30
+
+- id: tls.heartbleed
+  check: heartbleed
+  severity: high
+  title: Vulnérabilité Heartbleed
+  description: Heartbleed permet de lire des fragments de mémoire du serveur.
+  recommendation: Mettre à jour OpenSSL, remplacer les clés et réémettre les certificats concernés.
+
+- id: tls.robot
+  check: robot
+  severity: high
+  title: Vulnérabilité ROBOT
+  description: Un oracle RSA peut compromettre la confidentialité des connexions TLS.
+  recommendation: Mettre à jour la pile TLS et désactiver les suites à échange de clés RSA statique.
+
+- id: tls.openssl_ccs
+  check: openssl_ccs
+  severity: high
+  title: Vulnérabilité OpenSSL CCS injection
+  description: Une injection ChangeCipherSpec peut permettre une interception des connexions TLS.
+  recommendation: Mettre à jour OpenSSL vers une version corrigée.
