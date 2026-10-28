@@ -84,10 +84,12 @@ services:
       <<: *backend-environment
       DEV_SSRF_ALLOWED_HOSTS: '["demo.scanner.test"]'
       DEV_EXTRA_CA_FILE: /trust/ca.crt
+      ZAP_API_URL: http://zap:8080
+      ZAP_API_KEY: ${ZAP_API_KEY:?Renseigner ZAP_API_KEY dans .env}
     command: ["python", "-m", "app.workers.jobs"]
     volumes:
       - demo-trust:/trust:ro
-    networks: [worker-data, targets]
+    networks: [worker-data, targets, zap-control]
     healthcheck:
       test:
         - CMD
@@ -113,6 +115,39 @@ services:
         condition: service_healthy
       demo-ca:
         condition: service_completed_successfully
+      demo-site:
+        condition: service_healthy
+      zap:
+        condition: service_healthy
+
+  zap:
+    image: zaproxy/zap-stable:2.16.1
+    environment:
+      ZAP_API_KEY: ${ZAP_API_KEY:?Renseigner ZAP_API_KEY dans .env}
+    command:
+      - zap.sh
+      - -daemon
+      - -host
+      - 0.0.0.0
+      - -port
+      - "8080"
+      - -config
+      - api.key=${ZAP_API_KEY:?Renseigner ZAP_API_KEY dans .env}
+      - -config
+      - api.addrs.addr.name=.*
+      - -config
+      - api.addrs.addr.regex=true
+    mem_limit: 1g
+    networks: [zap-control, targets]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'curl -fsS -H "X-ZAP-API-Key: $$ZAP_API_KEY" http://127.0.0.1:8080/JSON/core/view/version/ >/dev/null'
+      interval: 5s
+      timeout: 5s
+      start_period: 60s
+      retries: 12
+    depends_on:
       demo-site:
         condition: service_healthy
 
@@ -170,6 +205,8 @@ networks:
   worker-data:
     internal: true
   targets:
+    internal: true
+  zap-control:
     internal: true
   dns:
     internal: true
