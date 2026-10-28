@@ -1,3 +1,4 @@
+import os
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from importlib.metadata import entry_points
@@ -6,6 +7,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 import httpx
+from redis import Redis
 
 from app.domain.ports import Scanner
 from app.infra.header_rules_config import load_header_rules
@@ -13,13 +15,32 @@ from app.infra.ratelimit_rules_config import load_ratelimit_rules
 from app.infra.scanners_config import ScannerConfig
 from app.infra.tls_rules_config import load_tls_rules
 from app.infra.waf_rules_config import load_waf_rules
+from app.infra.zap_rules_config import load_zap_rules
 from app.scanners.headers import HeadersScanner
 from app.scanners.ratelimit import RateLimitScanner, validate_burst_options
 from app.scanners.registry import ScannerRegistry
 from app.scanners.tls import TlsScanner
 from app.scanners.waf import WafScanner
+from app.scanners.zap import (
+    RedisZapLock,
+    ZapHttpProbe,
+    ZapLock,
+    ZapPassiveScanner,
+    validate_zap_api_key_env,
+    validate_zap_api_url,
+    validate_zap_options,
+)
 
 ENTRY_POINT_GROUP = "web_vuln_scanner.scanners"
+_ZAP_OPTIONS = {
+    "rules",
+    "api_url",
+    "api_key_env",
+    "max_depth",
+    "max_children",
+    "spider_timeout",
+    "passive_timeout",
+}
 
 
 @dataclass(frozen=True)
@@ -29,6 +50,8 @@ class ScannerContext:
     options: Mapping[str, object]
     allowed_hosts: frozenset[str] = frozenset()
     extra_ca_file: Path | None = None
+    app_env: str = "development"
+    zap_lock: ZapLock | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "options", MappingProxyType(dict(self.options)))
@@ -100,11 +123,67 @@ def _waf(context: ScannerContext) -> Scanner:
     )
 
 
+def _zap(context: ScannerContext) -> Scanner:
+    if context.app_env != "development":
+        raise ValueError("zap scanner requires app_env=development")
+    if context.options.keys() - _ZAP_OPTIONS:
+        raise ValueError(
+            "Unknown zap option; expected rules, api_url, api_key_env, "
+            "max_depth, max_children, spider_timeout, passive_timeout"
+        )
+    rules = context.options.get("rules", "zap_rules.yaml")
+    if not isinstance(rules, str) or not rules.strip():
+        raise ValueError("zap rules must be a non-empty path")
+    configured_url = (
+        validate_zap_api_url(context.options["api_url"]) if "api_url" in context.options else None
+    )
+    env_url = os.environ.get("ZAP_API_URL")
+    if env_url is not None:
+        env_url = validate_zap_api_url(env_url)
+    api_url = (
+        configured_url
+        if configured_url is not None and (env_url is None or configured_url != "http://zap:8080")
+        else (env_url or configured_url or "http://zap:8080")
+    )
+    api_key_env = validate_zap_api_key_env(context.options.get("api_key_env", "ZAP_API_KEY"))
+    api_key = os.environ.get(api_key_env, "")
+    if not api_key.strip() or api_key != api_key.strip():
+        raise ValueError(f"zap api key environment variable {api_key_env!r} must be set")
+    max_depth = context.options.get("max_depth", 3)
+    max_children = context.options.get("max_children", 50)
+    spider_timeout = context.options.get("spider_timeout", 60)
+    passive_timeout = context.options.get("passive_timeout", 60)
+    validate_zap_options(
+        max_depth=max_depth,
+        max_children=max_children,
+        spider_timeout=spider_timeout,
+        passive_timeout=passive_timeout,
+    )
+    lock = context.zap_lock
+    if lock is None:
+        redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+        lock = RedisZapLock(Redis.from_url(redis_url, socket_connect_timeout=2, socket_timeout=2))
+    return ZapPassiveScanner(
+        ZapHttpProbe(
+            api_url,
+            api_key,
+            max_depth=max_depth,
+            max_children=max_children,
+            spider_timeout=spider_timeout,
+            passive_timeout=passive_timeout,
+        ),
+        load_zap_rules(context.config_dir / rules),
+        allowed_hosts=context.allowed_hosts,
+        lock=lock,
+    )
+
+
 BUILTIN_FACTORIES: dict[str, Callable[[ScannerContext], Scanner]] = {
     "headers": _headers,
     "tls": _tls,
     "ratelimit": _ratelimit,
     "waf": _waf,
+    "zap": _zap,
 }
 
 
@@ -115,6 +194,8 @@ def load_scanners(
     *,
     allowed_hosts: Iterable[str] = (),
     extra_ca_file: Path | None = None,
+    app_env: str = "development",
+    zap_lock: ZapLock | None = None,
 ) -> tuple[Scanner, ...]:
     allowed_hosts = frozenset(allowed_hosts)
     plugins = {}
@@ -137,7 +218,15 @@ def load_scanners(
         if not callable(factory):
             raise ValueError(f"Scanner factory must be callable: {config.name!r}")
         scanner = factory(
-            ScannerContext(client, config_dir, config.options, allowed_hosts, extra_ca_file)
+            ScannerContext(
+                client,
+                config_dir,
+                config.options,
+                allowed_hosts,
+                extra_ca_file,
+                app_env,
+                zap_lock,
+            )
         )
         if (
             not isinstance(getattr(scanner, "name", None), str)

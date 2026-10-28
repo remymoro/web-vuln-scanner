@@ -24,6 +24,8 @@ def test_worker_passes_demo_options_only_in_development(monkeypatch, app_env):
         dev_ssrf_allowed_hosts=["demo.scanner.test"],
         dev_extra_ca_file=Path("/certs/ca.crt"),
     ).model_copy(update={"app_env": app_env})
+    monkeypatch.setenv("ZAP_API_KEY", "test-zap-key")
+    monkeypatch.delenv("ZAP_API_URL", raising=False)
     factory = Mock()
     monkeypatch.setattr(jobs, "get_settings", lambda: settings)
     monkeypatch.setattr(jobs, "get_worker_sessions", Mock())
@@ -38,10 +40,16 @@ def test_worker_passes_demo_options_only_in_development(monkeypatch, app_env):
         allowed_hosts=["demo.scanner.test"] if app_env == "development" else (),
         extra_ca_file=Path("/certs/ca.crt") if app_env == "development" else None,
     )
-    assert [scanner.name for scanner in runtime.scanners] == ["headers", "tls", "ratelimit", "waf"]
+    expected_scanners = (
+        ["headers", "tls", "ratelimit", "waf", "zap"]
+        if app_env == "development"
+        else ["headers", "tls", "ratelimit", "waf"]
+    )
+    assert [scanner.name for scanner in runtime.scanners] == expected_scanners
     assert load.call_args.kwargs == {
         "allowed_hosts": ["demo.scanner.test"] if app_env == "development" else (),
         "extra_ca_file": Path("/certs/ca.crt") if app_env == "development" else None,
+        "app_env": app_env,
     }
     probe_factory.assert_called_once_with(
         network_timeout=3,

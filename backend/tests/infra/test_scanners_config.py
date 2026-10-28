@@ -12,6 +12,18 @@ def test_shipped_config():
         ("tls", {"rules": "tls_rules.yaml", "network_timeout": 3, "network_max_retries": 0}),
         ("ratelimit", {"max_requests": 30, "max_duration": 3, "rules": "ratelimit_rules.yaml"}),
         ("waf", {"network_timeout": 3, "rules": "waf_rules.yaml"}),
+        (
+            "zap",
+            {
+                "api_url": "http://zap:8080",
+                "api_key_env": "ZAP_API_KEY",
+                "max_depth": 3,
+                "max_children": 50,
+                "spider_timeout": 60,
+                "passive_timeout": 60,
+                "rules": "zap_rules.yaml",
+            },
+        ),
     ]
 
 
