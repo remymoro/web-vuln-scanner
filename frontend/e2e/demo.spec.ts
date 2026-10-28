@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
 
 const root = resolve(__dirname, '../..');
-// Mesuré sur la pile Docker : E, 31/100 (8 constats d'en-têtes + TLS 1.1). Surchargeable.
+// Mesuré sur la pile Docker : E, 28/100 (en-têtes, TLS 1.1, aucune limitation de débit). Surchargeable.
 const expectedGrade = process.env['DEMO_EXPECTED_GRADE'] ?? 'E';
 
 function publishTxt(value: string) {
@@ -37,7 +37,9 @@ function publishTxt(value: string) {
   if (write.status !== 0) throw new Error(`Publication DNS impossible : ${write.stderr}`);
 }
 
-test('inscription, connexion, preuve DNS et rapport TLS sans violation CSP', async ({ page }) => {
+test('inscription, connexion, preuve DNS et rapport TLS et débit sans violation CSP', async ({
+  page,
+}) => {
   const cspErrors: string[] = [];
   const pageErrors: string[] = [];
   await page.addInitScript(() => {
@@ -102,6 +104,11 @@ test('inscription, connexion, preuve DNS et rapport TLS sans violation CSP', asy
     }),
   ).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Constats', exact: true })).toBeVisible();
+  await expect(
+    page.locator('section[aria-labelledby="report-heading"] li').filter({
+      has: page.getByText('Limitation de débit', { exact: true }),
+    }),
+  ).toBeVisible();
   await expect(page.locator('article.finding').first()).toBeVisible();
   expect(
     await page.locator('style').evaluateAll((styles) => styles.map((style) => style.nonce)),
