@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
 
 const root = resolve(__dirname, '../..');
-// Mesuré sur la pile Docker : E, 28/100 (en-têtes, TLS 1.1, aucune limitation de débit). Surchargeable.
+// Mesuré sur la pile Docker : E, 25/100 (en-têtes, TLS 1.1, aucune limitation, aucun WAF). Surchargeable.
 const expectedGrade = process.env['DEMO_EXPECTED_GRADE'] ?? 'E';
 
 function publishTxt(value: string) {
@@ -37,7 +37,7 @@ function publishTxt(value: string) {
   if (write.status !== 0) throw new Error(`Publication DNS impossible : ${write.stderr}`);
 }
 
-test('inscription, connexion, preuve DNS et rapport TLS et débit sans violation CSP', async ({
+test('inscription, connexion, preuve DNS et rapport TLS, débit et WAF sans violation CSP', async ({
   page,
 }) => {
   const cspErrors: string[] = [];
@@ -110,6 +110,14 @@ test('inscription, connexion, preuve DNS et rapport TLS et débit sans violation
     }),
   ).toBeVisible();
   await expect(page.locator('article.finding').first()).toBeVisible();
+  await expect(
+    page.locator('section[aria-labelledby="report-heading"] li').filter({
+      has: page.getByText('Pare-feu applicatif', { exact: true }),
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Aucun pare-feu applicatif détecté', exact: true }),
+  ).toBeVisible();
   expect(
     await page.locator('style').evaluateAll((styles) => styles.map((style) => style.nonce)),
   ).toEqual(expect.arrayContaining([nonce]));
