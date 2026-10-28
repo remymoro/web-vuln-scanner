@@ -1,0 +1,53 @@
+<p class="eyebrow">Votre espace</p>
+<h1>Mes sites</h1>
+<p>Déclarez un domaine, prouvez sa propriété et lancez votre premier audit.</p>
+<section class="panel" aria-labelledby="declare-heading">
+  <h2 id="declare-heading">Déclarer un site</h2>
+  <form [formRoot]="declaration">
+    <label for="url">Domaine ou URL</label>
+    <div class="form-row">
+      <input
+        id="url"
+        type="text"
+        placeholder="exemple.fr"
+        autocomplete="url"
+        [formField]="declaration.url"
+        aria-describedby="url-errors"
+      />
+      <button type="submit" [disabled]="declaration().submitting()">
+        {{ declaration().submitting() ? 'Déclaration…' : 'Déclarer' }}
+      </button>
+    </div>
+    <div id="url-errors" aria-live="polite">
+      @if (declaration.url().touched()) {
+        @for (error of declaration.url().errors(); track $index) {
+          <p class="field-error">{{ error.message }}</p>
+        }
+      }
+    </div>
+    <app-error-message [error]="error()" />
+  </form>
+</section>
+<section aria-labelledby="sites-heading">
+  <h2 id="sites-heading">Sites déclarés</h2>
+  <app-error-message [error]="targets.error()" />
+  @if (targets.error()) {
+    <button type="button" class="secondary" (click)="targets.reload()">Réessayer</button>
+  }
+  @if (targets.isLoading()) {
+    <p role="status">Chargement des sites…</p>
+  } @else if (!targets.error()) {
+    <ul class="item-list">
+      @for (target of targets.value(); track target.id) {
+        <li class="panel list-row">
+          <a [routerLink]="['/targets', target.id]">{{ target.domain }}</a>
+          <span class="badge" [class.verified]="target.verified">{{
+            target.verified ? 'Vérifié' : 'À vérifier'
+          }}</span>
+        </li>
+      } @empty {
+        <li class="panel">Aucun site déclaré pour le moment.</li>
+      }
+    </ul>
+  }
+</section>
