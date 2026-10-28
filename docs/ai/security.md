@@ -64,6 +64,26 @@ qu'en développement. Aucune exception n'est activée par défaut.
 La preuve de propriété reste obligatoire. Aucun outil externe ne bénéficie de
 ces exceptions : il devra respecter les règles d'épinglage et d'isolation ci-dessus.
 
+## Plugins de scanners
+
+Un plugin est du code de confiance exécuté dans le processus du worker : ce
+mécanisme ne fournit ni bac à sable ni isolation de ses effets. Installer uniquement
+des paquets de confiance. Le chargeur lit les métadonnées du groupe
+`web_vuln_scanner.scanners`, puis importe et instancie uniquement les noms de la
+liste d’autorisation `backend/config/scanners.yaml`. Un plugin installé mais non
+listé n’est jamais chargé par ce mécanisme.
+
+Sa fabrique reçoit un `ScannerContext` gelé contenant le client créé par
+`create_safe_client()` avec les réglages de démonstration existants. Le plugin
+réutilise ce client anti-SSRF et ne crée pas le sien. Les futurs outils qui ouvrent
+leurs propres connexions restent soumis aux règles d’épinglage et d’isolation
+ci-dessus. Le client partagé est fermé par le worker, pas par le plugin.
+
+L’isolation des exceptions protège la disponibilité du rapport, sans rendre un
+plugin non fiable sûr. Le rapport expose uniquement le type d’exception tronqué à
+100 caractères, jamais son message ou sa trace. Chaque scanner respecte son propre
+délai ; le délai RQ du scan est le filet de sécurité global.
+
 ## Limites
 
 - `feat/queue-workers` : un seul scan actif par cible (verrou en base) et délai maximum par scan (le scan passe à `failed` au-delà).

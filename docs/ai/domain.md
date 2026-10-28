@@ -46,14 +46,89 @@ class Finding:
 ```python
 class Scanner(Protocol):
     name: str
+    category: str
     def run(self, target: Target) -> list[Finding]: ...
 ```
 
-Ajouter un scanner = écrire une classe et l'enregistrer dans le registre. Rien d'autre ne change. Chaque outil externe est enveloppé dans un adaptateur qui traduit sa sortie en `Finding`.
+Chaque scanner expose un nom unique et une catégorie de rapport non vide. Chaque outil externe est enveloppé dans un adaptateur qui traduit sa sortie en `Finding`. Le scanner respecte son propre délai (requêtes HTTP, sous-processus, etc.) : l’orchestrateur ne l’interrompt pas individuellement. Le délai global RQ du scan reste le filet de sécurité et entraîne `failed` avec `timeout`, sans relance.
 
 `Target` est une dataclass gelée contenant uniquement `url: str` pour le moment. Le registre est une instance explicite, conserve l’ordre d’enregistrement et refuse les noms dupliqués.
 
 `HeadersScanner` reçoit son client HTTP par injection et ne suit pas les redirections. En production, ce client est créé par `create_safe_client()` (`security/ssrf.py`). Les règles sont dans `backend/config/header_rules.yaml`. Les constats de cookies ont les ids `headers.cookie.secure`, `headers.cookie.httponly` et `headers.cookie.samesite` ; plusieurs cookies peuvent partager un id. Leur evidence contient uniquement le nom du cookie, jamais sa valeur.
+
+## Exécutions et rapport partiel
+
+`ScannerRun` (`domain/scanner_run.py`) est une dataclass gelée : `scanner` (nom),
+`category`, `status` (`ok` ou `error`), `error` (type d’exception ou `None`),
+`findings_count`, `started_at`, `finished_at` (dates avec fuseau).
+
+`execute_scan` isole chaque appel à `run` : une exception de cible ou un bug de
+plugin donne un run `error`, sans message interne ni trace dans le rapport, puis
+les scanners suivants continuent. Les constats d’un scanner en échec sont écartés.
+Au moins un run `ok` donne un scan `done` ; un mélange `ok`/`error` donne
+`partial: true`, calculé depuis les runs, sans nouvel état ni colonne de scan.
+Tous en échec donnent `failed` avec `all scanners failed` ; aucun scanner donne
+`failed` avec `no scanners configured`. Un scan totalement en échec n’est pas un
+rapport partiel et son rapport reste inaccessible (409).
+
+Les erreurs hors scanners (base, Redis, etc.) remontent pour les relances RQ.
+Une tentative efface les anciens constats et runs dès le passage à `running`, puis
+remplace les deux ensembles avec son résultat final dans la même transaction.
+Les scans terminaux restent idempotents.
+
+## Configuration et plugins
+
+`backend/config/scanners.yaml` définit la liste d’autorisation, dans l’ordre
+d’exécution. Elle doit être non vide, ses noms uniques et ses clés connues :
+
+```yaml
+scanners:
+  - name: headers
+    options:
+      rules: header_rules.yaml
+```
+
+Les clés d’une entrée sont `name` et `options` (mapping facultatif, vide par défaut).
+Les options spécifiques sont validées par la fabrique ; `headers` accepte seulement
+`rules`, un chemin résolu depuis le dossier de configuration.
+
+Les fabriques intégrées sont dans `BUILTIN_FACTORIES` (`scanners/plugins.py`).
+La découverte externe utilise exclusivement la stdlib :
+`importlib.metadata.entry_points(group="web_vuln_scanner.scanners")`.
+Lire ces métadonnées n’importe pas les modules : seuls les noms autorisés par le
+YAML font l’objet d’un `entry_point.load()` et d’un appel de fabrique. Aucun plugin
+installé mais absent du fichier n’est importé par ce chargeur.
+
+Pour écrire un plugin, exposer une fabrique dans les métadonnées de son paquet :
+
+```toml
+[project.entry-points."web_vuln_scanner.scanners"]
+example = "example_scanner:build_scanner"
+```
+
+```python
+from app.scanners.plugins import ScannerContext
+
+
+def build_scanner(context: ScannerContext):
+    return ExampleScanner(context.client, context.options)
+```
+
+`ExampleScanner` doit déclarer `name = "example"`, une `category: str` non vide et
+`run(target: Target) -> list[Finding]`. Ses constats portent le même nom de scanner
+et sa catégorie. Ajouter ensuite `{name: example, options: {}}` au YAML.
+Le contexte gelé fournit `client` (client anti-SSRF créé par le worker), `config_dir`
+(`Path`) et `options` (mapping copié, non modifiable au premier niveau). Il ne crée
+pas de client HTTP ; il réutilise celui du contexte et respecte ses protections.
+Les valeurs imbriquées des options doivent être traitées comme de la configuration,
+sans les modifier.
+
+Un nom inconnu, un doublon d’entry points, un conflit entre intégré et plugin, une
+fabrique non appelable ou un contrat invalide (nom différent, catégorie absente,
+méthode `run` incompatible) arrête le démarrage du worker. Les conflits de noms
+sont refusés dès la découverte des métadonnées, même si le plugin n’est pas activé.
+Le point d’entrée `uv run python -m app.workers.jobs` valide ces composants avant
+l’écoute RQ ; le Compose utilise aussi ce point d’entrée.
 
 ## Scanners prévus
 
@@ -71,5 +146,14 @@ La notation est séparée des scanners : les scanners constatent, le moteur de n
 
 - Chaque sévérité retire des points sur 100 (par exemple haute −25, moyenne −10, faible −3).
 - Seuils couvrant tout l'intervalle : A ≥ 90, B ≥ 75, C ≥ 60, D ≥ 40, E sinon.
-- Une note par catégorie et une note globale.
+- Une note par catégorie et une note globale, calculées sur les seuls scanners `ok`.
+- Une catégorie évaluée sans constat vaut 100/100 et reçoit sa lettre.
+- Une catégorie sans scanner réussi reste présente avec `score: null`, `grade: null`
+  et aucune déduction : elle est non évaluée. Un échec ne retire aucun point.
+- Si plusieurs scanners partagent une catégorie, un seul succès suffit à lui donner
+  une note ; le rapport reste partiel dès qu’un autre scanner échoue.
+- La note globale conserve le calcul existant : 100 moins les pénalités de tous les
+  constats retenus, avec un plancher de zéro (ce n’est pas une moyenne des catégories).
+- `score(findings, policy, scanner_runs)` accepte les runs sans modifier `ScoringPolicy`.
+  Sans runs (anciens scans), le calcul historique depuis les constats reste disponible.
 - Le barème est dans un fichier de configuration (YAML) et chaque point retiré est traçable dans le rapport.
