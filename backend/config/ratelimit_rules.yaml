@@ -1,0 +1,10 @@
+- id: ratelimit.absent
+  severity: low
+  title: Aucune limitation de débit détectée
+  description: >-
+    Seule la page d'accueil (URL de la cible) est testée par une courte rafale de GET.
+    Aucun signe de limitation n'y a été observé ; cela ne prouve pas son absence
+    sur les autres routes, méthodes, utilisateurs ou fenêtres de temps.
+  recommendation: >-
+    Configurer une limitation de débit adaptée par client et par route, en priorité
+    sur les points sensibles (connexion, API), avec une réponse 429 et Retry-After.

@@ -9,9 +9,11 @@ import httpx
 
 from app.domain.ports import Scanner
 from app.infra.header_rules_config import load_header_rules
+from app.infra.ratelimit_rules_config import load_ratelimit_rules
 from app.infra.scanners_config import ScannerConfig
 from app.infra.tls_rules_config import load_tls_rules
 from app.scanners.headers import HeadersScanner
+from app.scanners.ratelimit import RateLimitScanner, validate_burst_options
 from app.scanners.registry import ScannerRegistry
 from app.scanners.tls import TlsScanner
 
@@ -65,9 +67,27 @@ def _tls(context: ScannerContext) -> Scanner:
     )
 
 
+def _ratelimit(context: ScannerContext) -> Scanner:
+    if context.options.keys() - {"rules", "max_requests", "max_duration"}:
+        raise ValueError("Unknown ratelimit option; expected rules, max_requests, max_duration")
+    rules = context.options.get("rules", "ratelimit_rules.yaml")
+    if not isinstance(rules, str) or not rules.strip():
+        raise ValueError("ratelimit rules must be a non-empty path")
+    max_requests = context.options.get("max_requests", 30)
+    max_duration = context.options.get("max_duration", 3)
+    validate_burst_options(max_requests, max_duration)
+    return RateLimitScanner(
+        context.client,
+        load_ratelimit_rules(context.config_dir / rules),
+        max_requests=max_requests,
+        max_duration=max_duration,
+    )
+
+
 BUILTIN_FACTORIES: dict[str, Callable[[ScannerContext], Scanner]] = {
     "headers": _headers,
     "tls": _tls,
+    "ratelimit": _ratelimit,
 }
 
 

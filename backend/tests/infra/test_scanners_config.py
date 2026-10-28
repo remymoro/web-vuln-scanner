@@ -10,6 +10,7 @@ def test_shipped_config():
     assert [(config.name, dict(config.options)) for config in configs] == [
         ("headers", {"rules": "header_rules.yaml"}),
         ("tls", {"rules": "tls_rules.yaml", "network_timeout": 3, "network_max_retries": 0}),
+        ("ratelimit", {"max_requests": 30, "max_duration": 3, "rules": "ratelimit_rules.yaml"}),
     ]
 
 

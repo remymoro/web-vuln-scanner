@@ -38,7 +38,7 @@ def test_worker_passes_demo_options_only_in_development(monkeypatch, app_env):
         allowed_hosts=["demo.scanner.test"] if app_env == "development" else (),
         extra_ca_file=Path("/certs/ca.crt") if app_env == "development" else None,
     )
-    assert [scanner.name for scanner in runtime.scanners] == ["headers", "tls"]
+    assert [scanner.name for scanner in runtime.scanners] == ["headers", "tls", "ratelimit"]
     assert load.call_args.kwargs == {
         "allowed_hosts": ["demo.scanner.test"] if app_env == "development" else (),
         "extra_ca_file": Path("/certs/ca.crt") if app_env == "development" else None,
