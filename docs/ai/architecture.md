@@ -32,6 +32,7 @@ ZAP tourne en plus dans son propre conteneur, piloté par les workers via son AP
 | POST | `/targets` | Déclarer un site, recevoir le jeton DNS |
 | GET | `/targets` | Lister les cibles de l'utilisateur |
 | GET | `/targets/{id}` | Consulter une de ses cibles |
+| GET | `/targets/{id}/scans` | Vingt derniers scans, du plus récent au plus ancien (id décroissant à date égale), même format que `/scans/{id}` ; 404 si cible absente ou étrangère |
 | POST | `/targets/{id}/verify` | Vérifier la propriété |
 | POST | `/scans` | Authentifié, corps `target_id`, 202 avec id/status ; 404 cible absente ou étrangère, 409 non vérifiée ou scan actif, 429 avec `Retry-After` si un scan de la cible date de moins de `SCAN_COOLDOWN_SECONDS` (600 s), 503 file indisponible |
 | GET | `/scans/{id}` | Authentifié, état, dates, note, erreur ; 404 absent ou étranger |
@@ -106,3 +107,17 @@ depuis la création du précédent. Les échecs dus à notre infrastructure (`qu
 - Tests dédiés à la garde anti-SSRF : IP privées, redirections, rebinding.
 - Exceptions métier dédiées. Plus tard : logs structurés.
 - CI GitHub Actions : `uv sync --locked`, ruff (lint et format) et pytest avec PostgreSQL et Redis 7 de service. Tests de bout en bout avec `SimpleWorker`, scanners factices et timeout réel ; aucun accès Internet. Un job séparé construit l'image Docker backend sans la publier.
+
+## Frontend Angular
+
+Angular 22 utilise des composants standalone, des signaux et des routes chargées
+à la demande. `core/` contient les contrats API typés, l’authentification, la garde
+et l’intercepteur fonctionnels ; `features/` regroupe connexion/inscription, liste
+et détail des sites, suivi et rapport ; `shared/` fournit les badges et messages.
+Les formulaires utilisent Signal Forms ; les lectures utilisent `httpResource`.
+Le suivi recharge après 2 s, réessaie après une erreur réseau et s’arrête en état
+`done`/`failed` ou à la destruction. Le rapport se charge seulement après `done`.
+Les constats sont triés high → medium → low → info.
+
+Tous les appels utilisent `/api/` : le proxy `ng serve` et nginx retirent ce préfixe.
+La CI a un job frontend séparé (`npm ci`, Vitest, build), sans Playwright.

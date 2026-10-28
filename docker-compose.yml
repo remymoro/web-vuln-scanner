@@ -59,13 +59,23 @@ services:
       DNS_NAMESERVERS: '["172.30.53.53"]'
     ports:
       - "127.0.0.1:8000:8000"
-    networks: [edge, api-data, dns]
+    networks: [edge, web, api-data, dns]
     depends_on:
       migrate:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
       demo-dns:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "127.0.0.1:4200:8080"
+    networks: [edge, web]
+    depends_on:
+      api:
         condition: service_healthy
 
   worker:
@@ -158,6 +168,8 @@ services:
 networks:
   # Seul réseau non interne : Docker ne publie un port que si le conteneur y est relié.
   edge: {}
+  web:
+    internal: true
   api-data:
     internal: true
   worker-data:

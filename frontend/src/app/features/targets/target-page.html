@@ -1,0 +1,93 @@
+<a routerLink="/targets">← Mes sites</a>
+<app-error-message [error]="target.error()" />
+@if (target.error()) {
+  <button type="button" class="secondary" (click)="target.reload()">Réessayer</button>
+}
+@if (target.isLoading()) {
+  <p role="status">Chargement du site…</p>
+}
+@if (target.hasValue()) {
+  @let site = target.value();
+  <h1>{{ site.domain }}</h1>
+  <p>
+    <span class="badge" [class.verified]="site.verified">{{
+      site.verified ? 'Vérifié' : 'À vérifier'
+    }}</span>
+  </p>
+  <section class="panel" aria-labelledby="dns-heading">
+    <h2 id="dns-heading">Prouver la propriété</h2>
+    <p>
+      Publiez cet enregistrement chez votre fournisseur DNS. Sa propagation peut prendre quelques
+      minutes.
+    </p>
+    <dl class="dns-record">
+      <dt>Type</dt>
+      <dd>{{ site.dns_record.type }}</dd>
+      <dt>Nom</dt>
+      <dd>
+        <code>{{ site.dns_record.name }}</code>
+      </dd>
+      <dt>Valeur</dt>
+      <dd>
+        <code data-testid="dns-value">{{ site.dns_record.value }}</code>
+      </dd>
+    </dl>
+    <div class="actions">
+      <button type="button" class="secondary" (click)="copyRecord()">Copier</button>
+      <button type="button" (click)="verify()" [disabled]="busy() || site.verified">
+        Vérifier
+      </button>
+    </div>
+    <p role="status">{{ copyMessage() }}</p>
+    @if (site.verified) {
+      <p class="success" role="status">Propriété vérifiée.</p>
+    }
+  </section>
+  <app-error-message [error]="error()" />
+  <div class="actions">
+    <button
+      type="button"
+      (click)="launchScan()"
+      [disabled]="busy() || !site.verified"
+      aria-describedby="scan-hint"
+    >
+      Lancer un scan
+    </button>
+    <p id="scan-hint">
+      {{
+        site.verified
+          ? 'Le scan analyse les en-têtes de sécurité HTTPS.'
+          : 'Vérifiez d’abord la propriété du site.'
+      }}
+    </p>
+  </div>
+  <section aria-labelledby="history-heading">
+    <h2 id="history-heading">Historique des scans</h2>
+    <p>Les 20 scans les plus récents.</p>
+    <app-error-message [error]="history.error()" />
+    @if (history.error()) {
+      <button type="button" class="secondary" (click)="history.reload()">
+        Recharger l’historique
+      </button>
+    }
+    @if (history.isLoading()) {
+      <p role="status">Chargement de l’historique…</p>
+    } @else if (!history.error()) {
+      <ul class="item-list">
+        @for (scan of history.value(); track scan.id) {
+          <li class="panel list-row">
+            <a [routerLink]="['/scans', scan.id]"
+              >Scan du {{ scan.created_at | date: 'dd/MM/yyyy HH:mm:ss' }}</a
+            >
+            <span>{{ statusLabels[scan.status] }}</span>
+            @if (scan.grade) {
+              <app-grade-badge [grade]="scan.grade" />
+            }
+          </li>
+        } @empty {
+          <li class="panel">Aucun scan pour ce site.</li>
+        }
+      </ul>
+    }
+  </section>
+}

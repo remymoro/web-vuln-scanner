@@ -1,0 +1,54 @@
+<section class="panel auth-panel">
+  <p class="eyebrow">Web Vuln Scanner</p>
+  <h1>{{ registering ? 'Créer un compte' : 'Connexion' }}</h1>
+  <p>Évaluez la sécurité des sites dont vous êtes propriétaire.</p>
+  @if (registered) {
+    <p class="success" role="status">Compte créé. Connectez-vous pour continuer.</p>
+  }
+  <form [formRoot]="credentials">
+    <label for="email">Adresse e-mail</label>
+    <input
+      id="email"
+      type="email"
+      autocomplete="email"
+      [formField]="credentials.email"
+      aria-describedby="email-errors"
+    />
+    <div id="email-errors" aria-live="polite">
+      @if (credentials.email().touched()) {
+        @for (error of credentials.email().errors(); track $index) {
+          <p class="field-error">{{ error.message }}</p>
+        }
+      }
+    </div>
+    <label for="password">Mot de passe</label>
+    <input
+      id="password"
+      type="password"
+      [attr.autocomplete]="registering ? 'new-password' : 'current-password'"
+      [formField]="credentials.password"
+      aria-describedby="password-hint password-errors"
+    />
+    <small id="password-hint">De 12 à 128 caractères.</small>
+    <div id="password-errors" aria-live="polite">
+      @if (credentials.password().touched()) {
+        @for (error of credentials.password().errors(); track $index) {
+          <p class="field-error">{{ error.message }}</p>
+        }
+      }
+    </div>
+    <app-error-message [error]="error()" />
+    <button type="submit" [disabled]="credentials().submitting()">
+      {{
+        credentials().submitting() ? 'Envoi…' : registering ? 'Créer mon compte' : 'Se connecter'
+      }}
+    </button>
+  </form>
+  <p>
+    @if (registering) {
+      Déjà inscrit ? <a routerLink="/login">Se connecter</a>
+    } @else {
+      <a routerLink="/register">Créer un compte</a>
+    }
+  </p>
+</section>

@@ -149,3 +149,20 @@ def test_list_for_target_since_filters_by_target_and_date(repository, pending, t
     assert [scan.id for scan in repository.list_for_target_since(pending.target_id, since)] == [
         pending.id
     ]
+
+
+def test_list_for_target_returns_twenty_latest_with_stable_order(repository, target, db_session):
+    other = RegisteredTarget.create(target.user_id, "other.example.com")
+    SqlAlchemyTargetRepository(db_session).add(other)
+    repository.add(Scan.create(other.id))
+    scans = [
+        replace(Scan.create(target.id), created_at=NOW + timedelta(seconds=index // 2)).fail(
+            "reason", NOW + timedelta(minutes=1)
+        )
+        for index in range(25)
+    ]
+    for scan in reversed(scans):
+        repository.add(scan)
+    expected = sorted(scans, key=lambda scan: (scan.created_at, scan.id), reverse=True)[:20]
+    assert repository.list_for_target(target.id) == expected
+    assert repository.list_for_target(uuid.uuid4()) == []

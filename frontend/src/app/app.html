@@ -1,0 +1,15 @@
+<a class="skip-link" href="#main">Aller au contenu</a>
+<header class="site-header">
+  <a class="brand" routerLink="/targets">Web Vuln Scanner</a>
+  <nav aria-label="Navigation principale">
+    @if (auth.authenticated()) {
+      <a routerLink="/targets">Mes sites</a>
+      <button class="secondary" type="button" (click)="logout()">Se déconnecter</button>
+    } @else {
+      <a routerLink="/login">Connexion</a>
+      <a routerLink="/register">Inscription</a>
+    }
+  </nav>
+</header>
+<main id="main" tabindex="-1"><router-outlet /></main>
+<footer>Projet d’apprentissage · Audit des sites dont vous avez prouvé la propriété.</footer>

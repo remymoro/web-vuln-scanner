@@ -1,0 +1,69 @@
+<a routerLink="/targets">← Mes sites</a>
+<h1>Suivi du scan</h1>
+<app-error-message [error]="scan.error()" />
+@if (scan.error()) {
+  <button type="button" class="secondary" (click)="scan.reload()">Reprendre le suivi</button>
+}
+<div aria-live="polite" aria-atomic="true">
+  @if (scan.hasValue()) {
+    @let state = scan.value();
+    <p class="scan-state" role="status">{{ statusLabels[state.status] }}</p>
+    <p>Demandé le {{ state.created_at | date: 'dd/MM/yyyy à HH:mm:ss' }}</p>
+    @if (state.status === 'pending' || state.status === 'running') {
+      <p>Le suivi est actualisé toutes les 2 secondes.</p>
+    }
+    @if (state.status === 'failed') {
+      <p class="error" role="alert">
+        Le scan a échoué. Motif : {{ state.error ?? 'Motif non précisé' }}
+      </p>
+    }
+    <a [routerLink]="['/targets', state.target_id]">Revenir au site et à son historique</a>
+  } @else if (scan.isLoading()) {
+    <p role="status">Chargement du scan…</p>
+  }
+</div>
+<app-error-message [error]="report.error()" />
+@if (report.error()) {
+  <button type="button" class="secondary" (click)="report.reload()">Recharger le rapport</button>
+}
+@if (report.isLoading()) {
+  <p role="status">Chargement du rapport…</p>
+}
+@if (report.hasValue()) {
+  @let result = report.value();
+  <section class="panel" aria-labelledby="report-heading">
+    <h2 id="report-heading">Rapport de sécurité</h2>
+    <div class="report-score" data-testid="report-grade">
+      <app-grade-badge [grade]="result.grade" />
+      <strong>{{ result.score }}<span class="muted"> / 100</span></strong>
+    </div>
+    <h3>Notes par catégorie</h3>
+    <ul class="item-list">
+      @for (category of result.categories; track category.category) {
+        <li class="list-row">
+          <span>{{ category.category }}</span
+          ><span>{{ category.score }} / 100</span><app-grade-badge [grade]="category.grade" />
+        </li>
+      } @empty {
+        <li>Aucune catégorie évaluée.</li>
+      }
+    </ul>
+  </section>
+  <section aria-labelledby="findings-heading">
+    <h2 id="findings-heading">Constats</h2>
+    <p>Du niveau de gravité le plus élevé au plus faible.</p>
+    @for (finding of findings(); track $index) {
+      <article class="panel finding">
+        <app-severity-badge [severity]="finding.severity" />
+        <h3>{{ finding.title }}</h3>
+        <p>{{ finding.description }}</p>
+        <h4>Preuve</h4>
+        <pre>{{ finding.evidence }}</pre>
+        <h4>Recommandation</h4>
+        <p>{{ finding.recommendation }}</p>
+      </article>
+    } @empty {
+      <p class="panel success">Aucun constat relevé par les scanners exécutés.</p>
+    }
+  </section>
+}
