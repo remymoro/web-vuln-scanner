@@ -27,7 +27,7 @@ masquent les cibles des autres utilisateurs avec un 404.
 - Utiliser `safe_get` pour suivre les redirections une par une (cinq au maximum par défaut), revérifier chaque destination avant la requête et fermer chaque réponse intermédiaire. La garde à la connexion reste active en complément du contrôle d'URL.
 - Tests obligatoires sans réseau ni DNS réels : 127.0.0.1, 10.x, 169.254.x, ::1, redirection vers une IP privée, rebinding.
 
-### Outils qui ouvrent leurs propres connexions (sslyze, wafw00f, ZAP)
+### Outils qui ouvrent leurs propres connexions (sslyze, ZAP)
 
 Ces outils ne peuvent pas utiliser `create_safe_client()`. Appeler `check_url()` juste avant ne suffit pas : l'outil refait sa propre résolution DNS, ce qui rouvre le DNS rebinding. Chaque adaptateur doit donc :
 
@@ -41,6 +41,37 @@ Le scanner TLS applique cette règle avant tout appel à sslyze :
 sslyze ne refait pas de DNS et ne reçoit aucun proxy ; le nom est conservé pour
 le SNI et la vérification du certificat. Une IP refusée lève `SsrfBlockedError`
 et donne un scanner `error`. Seules les commandes TLS nécessaires sont activées.
+
+### WAF : remplacement du réseau de wafw00f
+
+wafw00f 2.4.2 n'est pas utilisé tel quel : son `Request` utilise `requests` avec
+`verify=False`, des redirections automatiques, ses propres DNS et des proxies
+possibles. Cela contournerait la protection anti-SSRF. `Wafw00fProbe` remplace
+entièrement cette méthode par le client `create_safe_client()` du contexte : TLS
+vérifié, DNS validé et IP épinglée par ce client, aucun proxy, redirections toujours
+refusées. La version exacte et la signature de `Request` sont vérifiées avant les
+requêtes ; les tests font échouer tout appel à `requests` pendant un scan complet.
+
+Les en-têtes et paramètres demandés sont conservés. L'URL reste celle de la cible :
+comme le `Request` de la version auditée, l'adaptateur ignore `path` (donc aussi les
+variations de chemin LFI). Les signatures lisent seulement statut, raison,
+en-têtes et texte ; `matchCookie` lit `Set-Cookie`. Le corps décodé est lu en flux,
+tronqué à 100 Kio puis fermé. Les délais par opération ne dépassent ni celui du
+client ni `network_timeout` (3 s par défaut, 1–10 s configurables), avec une échéance
+contrôlée entre blocs de lecture. HTTPX n'impose pas une échéance absolue, notamment
+pour DNS ; le délai global RQ reste le filet de sécurité.
+
+L'arrêt au premier nom (`findall=False`) et le repli générique donnent deux à sept
+GET, plafonnés à sept. Toute erreur réseau ou dépassement de budget remonte vers
+l'orchestrateur : scanner non évalué. Renvoyer `None` serait ambigu : wafw00f peut
+transformer une connexion impossible en WAF générique ou en absence apparente.
+
+**Ces sondes envoient des chaînes ressemblant à des attaques** : XSS, SQL,
+lecture de fichier, et selon les méthodes de wafw00f, XXE ou commande système.
+Elles peuvent déclencher les alertes de sécurité du propriétaire et être
+interprétées par une application vulnérable ; elles ne sont pas qualifiées
+d'inoffensives. Elles ne sont exécutées que sur son site, dont la propriété est
+prouvée par DNS. Les descriptions des constats WAF rendent cette activité explicite.
 
 ### Exceptions de démonstration (développement uniquement)
 

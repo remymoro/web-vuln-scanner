@@ -31,7 +31,8 @@ indépendant (`docker-compose.test.yml`).
   certificat serveur expiré est renouvelé. Aucun matériel TLS n'entre dans le dépôt.
 - `demo-site` utilise nginx HTTPS sans HSTS ni X-Content-Type-Options, avec CSP
   `unsafe-inline` et cookie sans attributs de protection. Les scanners `headers`
-  et `tls`, ainsi que `ratelimit`, sont activés. La démo n'a aucune limitation de débit.
+  et `tls`, ainsi que `ratelimit` et `waf`, sont activés. La démo n'a ni limitation
+  de débit ni WAF.
   Elle accepte volontairement TLS 1.1 en plus de TLS 1.2/1.3,
   avec `@SECLEVEL=0` ; 3DES est proposé si OpenSSL de l'image le fournit encore.
   Ces réglages ne conviennent qu'à cette cible de démonstration isolée.
@@ -67,9 +68,9 @@ La note dépend des protocoles et suites réellement acceptés par l'image nginx
 `DEMO_EXPECTED_GRADE=E ./scripts/demo.sh` active une vérification facultative de la
 note ; sans cette variable, le script affiche le résultat. Le même réglage surcharge
 l'attente Playwright (`E` par défaut), qui vérifie aussi les catégories `TLS` et
-`Limitation de débit`. Note mesurée sur la pile Docker : **E, 28/100** : 8 constats
-d'en-têtes, TLS 1.1 accepté (l'OpenSSL de l'image nginx ne propose plus 3DES) et
-aucune limitation de débit (30 requêtes en 0,1 s, aucun 429).
+`Limitation de débit` et `Pare-feu applicatif`. Note mesurée sur la pile Docker :
+**E, 25/100** : 8 constats d'en-têtes, TLS 1.1 accepté (l'OpenSSL de l'image nginx ne
+propose plus 3DES), aucune limitation de débit et aucun pare-feu applicatif détecté.
 
 Après avoir modifié un fichier de `deploy/demo/` (par exemple `nginx.conf`), recréer le
 conteneur : `docker compose up -d --force-recreate demo-site`. Ces fichiers sont montés un par
