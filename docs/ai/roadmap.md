@@ -44,3 +44,7 @@ Chaque branche n'ajoute que ce dont elle a besoin. Les contraintes de version so
 | `feat/k8s-keda` | KEDA (dans le cluster, pas en Python) | Scaler les workers selon la file Redis |
 
 Pour les tests d'intégration (branches 7 et 9), une base PostgreSQL et un Redis de test sont lancés via Docker.
+
+Ligne 12 : `feat/scanner-tls` ajoute l'adaptateur sslyze avec IP épinglée, l'analyse
+pure et les règles TLS configurables. La démo TLS faible et sa note Playwright
+restent à confirmer sur la pile réelle.
