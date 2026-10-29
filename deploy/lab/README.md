@@ -31,6 +31,20 @@ dans `/zones/juiceshop.lab.zone`, vérifie la cible, lance le scan et affiche la
 l'état de chaque scanner et chaque catégorie. Cette zone est séparée de
 `scanner.test.zone`, que `demo.sh` réécrit entièrement.
 
+Par défaut, le compte est jetable (e-mail aléatoire, mot de passe jamais affiché). Pour
+retrouver le scan dans le frontend, fournir un compte : il est créé au premier lancement,
+puis réutilisé avec sa cible déjà vérifiée. Deux scans de la même cible doivent être
+espacés de `SCAN_COOLDOWN_SECONDS` (10 minutes par défaut), sinon l'API répond 429.
+
+```bash
+read -rsp "Mot de passe : " LAB_PASSWORD && export LAB_PASSWORD
+LAB_EMAIL=remy@scanner.test ./scripts/lab-juice.sh
+```
+
+Le frontend n'écoute que sur `127.0.0.1:4200` de Debian01. Depuis un autre poste, passer
+par un tunnel SSH plutôt que d'ouvrir le port :
+`ssh -N -L 4200:127.0.0.1:4200 <utilisateur>@10.10.10.20`, puis `http://localhost:4200`.
+
 ## Pare-feu (`scripts/lab-firewall.sh`)
 
 Le réseau `lab` n'est pas interne : sans filtrage, ZAP et le worker joindraient tout le LAN

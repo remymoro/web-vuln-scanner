@@ -89,28 +89,42 @@ def main():
     if not 1 <= timeout <= 3600:
         raise ValueError("LAB_TIMEOUT_SECONDS doit être compris entre 1 et 3600")
     check_network()
+    # Avec LAB_EMAIL et LAB_PASSWORD, le compte est réutilisé : le scan apparaît dans le
+    # frontend. Sans eux, un compte jetable est créé à chaque lancement.
+    email = os.environ.get("LAB_EMAIL")
+    password = os.environ.get("LAB_PASSWORD")
+    if (email is None) != (password is None):
+        raise ValueError("Renseigner LAB_EMAIL et LAB_PASSWORD ensemble")
     credentials = {
-        "email": f"lab-{uuid.uuid4().hex}@scanner.test",
-        "password": secrets.token_urlsafe(32),
+        "email": email or f"lab-{uuid.uuid4().hex}@scanner.test",
+        "password": password or secrets.token_urlsafe(32),
     }
-    request("POST", "/auth/register", credentials)
+    created = request("POST", "/auth/register", credentials, retry_statuses=(409,))
     token = request("POST", "/auth/login", credentials)["access_token"]
-    target = request("POST", "/targets", {"url": domain})
-    print(f"Compte créé ; cible déclarée : {target['domain']}", flush=True)
+    print(f"Compte {'créé' if created else 'existant'} : {credentials['email']}", flush=True)
 
-    value = target["dns_record"]["value"]
-    if re.fullmatch(r"scanner-verify=[A-Za-z0-9_-]+", value) is None:
-        raise ValueError("Jeton DNS inattendu")
-    publish_txt(value)
-    deadline = time.monotonic() + 30
-    while True:
-        verified = request("POST", f"/targets/{target['id']}/verify", retry_statuses=(400, 503))
-        if verified is not None and verified["verified"]:
-            break
-        if time.monotonic() >= deadline:
-            raise TimeoutError("Le TXT n'a pas été pris en compte dans les 30 secondes")
-        time.sleep(1)
-    print("Propriété vérifiée par DNS ; lancement du scan.", flush=True)
+    target = next((t for t in request("GET", "/targets") if t["domain"] == domain), None)
+    if target is None:
+        target = request("POST", "/targets", {"url": domain})
+        print(f"Cible déclarée : {target['domain']}", flush=True)
+    if target["verified"]:
+        print("Propriété déjà vérifiée ; lancement du scan.", flush=True)
+    else:
+        value = target["dns_record"]["value"]
+        if re.fullmatch(r"scanner-verify=[A-Za-z0-9_-]+", value) is None:
+            raise ValueError("Jeton DNS inattendu")
+        publish_txt(value)
+        deadline = time.monotonic() + 30
+        while True:
+            verified = request(
+                "POST", f"/targets/{target['id']}/verify", retry_statuses=(400, 503)
+            )
+            if verified is not None and verified["verified"]:
+                break
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Le TXT n'a pas été pris en compte dans les 30 secondes")
+            time.sleep(1)
+        print("Propriété vérifiée par DNS ; lancement du scan.", flush=True)
 
     scan = request("POST", "/scans", {"target_id": target["id"]})
     deadline = time.monotonic() + timeout
