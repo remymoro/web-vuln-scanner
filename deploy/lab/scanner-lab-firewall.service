@@ -1,0 +1,15 @@
+# Remet les règles de scripts/lab-firewall.sh à chaque démarrage (ou redémarrage) de Docker.
+# Installation : deploy/lab/README.md.
+[Unit]
+Description=Pare-feu du lab web-vuln-scanner (DOCKER-USER)
+After=docker.service
+Requires=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/scanner-lab-firewall apply
+
+[Install]
+WantedBy=docker.service

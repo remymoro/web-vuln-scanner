@@ -1,0 +1,29 @@
+# Lab Proxmox : scanner Juice Shop (Debian02, 10.10.10.30:3000) depuis Debian01.
+# Complète docker-compose.yml, sans le modifier :
+#   docker compose -f docker-compose.yml -f docker-compose.lab.yml up -d --build
+# Avant le premier lancement : sudo scripts/lab-firewall.sh (voir deploy/lab/README.md).
+services:
+  worker:
+    environment:
+      DEV_SSRF_ALLOWED_HOSTS: '["demo.scanner.test","juiceshop.lab"]'
+      DEV_TARGET_ORIGINS: '{"juiceshop.lab":"http://juiceshop.lab:3000/"}'
+    # Le DNS de Docker résout toujours postgres, redis et zap, puis transmet le reste à demo-dns.
+    dns: [172.30.53.53]
+    networks: [worker-data, targets, zap-control, dns, lab]
+    depends_on:
+      demo-dns:
+        condition: service_healthy
+
+  zap:
+    dns: [172.30.53.53]
+    networks: [zap-control, targets, dns, lab]
+    depends_on:
+      demo-dns:
+        condition: service_healthy
+
+networks:
+  # Seul réseau sortant du worker et de ZAP. Le nom du bridge est fixe pour que
+  # scripts/lab-firewall.sh n'y laisse passer que 10.10.10.30:3000.
+  lab:
+    driver_opts:
+      com.docker.network.bridge.name: br-scanner-lab
