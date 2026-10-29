@@ -88,8 +88,8 @@ prouvée par DNS. Les descriptions des constats WAF rendent cette activité expl
 ### Exceptions de démonstration (développement uniquement)
 
 `APP_ENV` vaut `production` par défaut (`development`, `test`, `production` acceptés).
-La configuration refuse de démarrer avec `DEV_SSRF_ALLOWED_HOSTS` non vide ou
-`DEV_EXTRA_CA_FILE` renseigné si `APP_ENV` n'est pas `development`. Le worker
+La configuration refuse de démarrer avec `DEV_SSRF_ALLOWED_HOSTS` ou
+`DEV_TARGET_ORIGINS` non vides, ou `DEV_EXTRA_CA_FILE` renseigné, si `APP_ENV` n'est pas `development`. Le worker
 valide les réglages avant de lancer RQ et sa fabrique ne transmet ces exceptions
 qu'en développement. Aucune exception n'est activée par défaut.
 
@@ -110,6 +110,16 @@ qu'en développement. Aucune exception n'est activée par défaut.
   `DNS_NAMESERVERS` (liste JSON d'IP ou absent) choisit les résolveurs dnspython ;
   c'est un réglage DNS autorisé dans tous les environnements, pas une exception
   anti-SSRF. Il ne change pas la résolution à la connexion du client HTTP.
+
+- `DEV_TARGET_ORIGINS` est un objet JSON `{"nom": "http://nom:port/"}`. Chaque nom
+  doit déjà figurer dans `DEV_SSRF_ALLOWED_HOSTS` ; l'origine reprend ce nom exact, avec
+  un port explicite, le chemin `/` et ni userinfo, ni requête, ni fragment. Le worker
+  remplace alors l'URL `https://nom/` de la cible vérifiée par cette origine (schéma `http`
+  possible), et la garde n'accepte le port supplémentaire que pour ce couple nom-port :
+  à chaque contrôle d'URL, à chaque connexion TCP et dans les scanners TLS et ZAP. Une
+  redirection vers un autre port reste bloquée. Usage : le lab Proxmox
+  (`docker-compose.lab.yml`, `deploy/lab/README.md`), dont le réseau sortant `lab` est
+  limité par `scripts/lab-firewall.sh` à Juice Shop.
 
 La preuve de propriété reste obligatoire. `ScannerContext` transmet aux outils
 externes les hôtes autorisés (ensemble gelé) et la CA supplémentaire, uniquement

@@ -84,6 +84,13 @@ conteneur : `docker compose up -d --force-recreate demo-site`. Ces fichiers sont
 un ; un éditeur qui remplace le fichier laisse le conteneur sur l'ancienne version, et un
 simple `docker compose restart` échoue.
 
+## Lab Proxmox : Juice Shop (`docker-compose.lab.yml`)
+
+Sur Debian01, l'override `docker-compose.lab.yml` permet de scanner Juice Shop
+(Debian02, `http://10.10.10.30:3000`) sous le nom `juiceshop.lab`, servi par `demo-dns`.
+Pare-feu `DOCKER-USER`, persistance systemd et effet de l'erreur TLS sur la note :
+`deploy/lab/README.md`.
+
 ## k3s sur Proxmox (`feat/k8s`)
 
 Cible : un cluster k3s dans des VM du Proxmox, sur un autre PC que le poste de développement.
