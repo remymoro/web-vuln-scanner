@@ -5,3 +5,11 @@ scanner.test:53 {
         reload 2s
     }
 }
+
+# Lab Proxmox : Juice Shop sur Debian02 (voir docker-compose.lab.yml).
+juiceshop.lab:53 {
+    errors
+    file /zones/juiceshop.lab.zone juiceshop.lab {
+        reload 2s
+    }
+}

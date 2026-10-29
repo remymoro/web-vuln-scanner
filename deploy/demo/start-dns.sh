@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
-if [ ! -s /zones/scanner.test.zone ]; then
-    cp /etc/coredns/scanner.test.zone /zones/scanner.test.zone
-fi
+# Le volume /zones garde les TXT écrits par les scripts : ne copier que les zones absentes.
+for zone in scanner.test juiceshop.lab; do
+    if [ ! -s "/zones/$zone.zone" ]; then
+        cp "/etc/coredns/$zone.zone" "/zones/$zone.zone"
+    fi
+done
 exec coredns "$@"

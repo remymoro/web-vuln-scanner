@@ -1,0 +1,6 @@
+$ORIGIN juiceshop.lab.
+$TTL 1
+@ IN SOA ns.scanner.test. hostmaster.scanner.test. (1 60 60 3600 1)
+@ IN NS ns.scanner.test.
+@ IN A 10.10.10.30
+@ IN TXT "scanner-verify=not-configured"
