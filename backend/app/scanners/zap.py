@@ -547,11 +547,13 @@ class ZapPassiveScanner:
         rules: Sequence[ZapExcludedRule] = (),
         *,
         allowed_hosts: Iterable[str] = (),
+        extra_ports: Iterable[tuple[str, int]] = (),
         lock: ZapLock | None = None,
     ) -> None:
         self._probe = probe
         self._rules = tuple(rules)
         self._allowed_hosts = frozenset(allowed_hosts)
+        self._extra_ports = frozenset(extra_ports)
         self._lock: ZapLock = lock if lock is not None else nullcontext()
 
     def run(self, target: Target) -> list[Finding]:
@@ -561,7 +563,10 @@ class ZapPassiveScanner:
                 url.scheme not in {"http", "https"}
                 or not url.hostname
                 or "@" in url.netloc
-                or url.port not in {None, 80, 443}
+                or (
+                    url.port not in {None, 80, 443}
+                    and (url.hostname, url.port) not in self._extra_ports
+                )
             ):
                 raise ValueError("Invalid ZAP target URL")
             host = url.hostname.encode("idna").decode("ascii")

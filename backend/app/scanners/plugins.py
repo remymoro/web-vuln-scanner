@@ -52,10 +52,12 @@ class ScannerContext:
     extra_ca_file: Path | None = None
     app_env: str = "development"
     zap_lock: ZapLock | None = None
+    extra_ports: frozenset[tuple[str, int]] = frozenset()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "options", MappingProxyType(dict(self.options)))
         object.__setattr__(self, "allowed_hosts", frozenset(self.allowed_hosts))
+        object.__setattr__(self, "extra_ports", frozenset(self.extra_ports))
 
 
 def _headers(context: ScannerContext) -> Scanner:
@@ -89,6 +91,7 @@ def _tls(context: ScannerContext) -> Scanner:
         ),
         load_tls_rules(context.config_dir / rules),
         allowed_hosts=context.allowed_hosts,
+        extra_ports=context.extra_ports,
     )
 
 
@@ -174,6 +177,7 @@ def _zap(context: ScannerContext) -> Scanner:
         ),
         load_zap_rules(context.config_dir / rules),
         allowed_hosts=context.allowed_hosts,
+        extra_ports=context.extra_ports,
         lock=lock,
     )
 
@@ -196,6 +200,7 @@ def load_scanners(
     extra_ca_file: Path | None = None,
     app_env: str = "development",
     zap_lock: ZapLock | None = None,
+    extra_ports: Iterable[tuple[str, int]] = (),
 ) -> tuple[Scanner, ...]:
     allowed_hosts = frozenset(allowed_hosts)
     plugins = {}
@@ -226,6 +231,7 @@ def load_scanners(
                 extra_ca_file,
                 app_env,
                 zap_lock,
+                frozenset(extra_ports),
             )
         )
         if (

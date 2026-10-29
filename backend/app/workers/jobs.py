@@ -3,11 +3,12 @@
 import atexit
 import os
 import uuid
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from redis import Redis
 from rq import Worker
@@ -57,9 +58,14 @@ def build_worker_runtime() -> WorkerRuntime:
     configs = load_scanners_config(CONFIG_DIR / "scanners.yaml")
     if settings.app_env != "development":
         configs = tuple(config for config in configs if config.name != "zap")
-    allowed_hosts = settings.dev_ssrf_allowed_hosts if settings.app_env == "development" else ()
-    extra_ca_file = settings.dev_extra_ca_file if settings.app_env == "development" else None
-    client = create_safe_client(allowed_hosts=allowed_hosts, extra_ca_file=extra_ca_file)
+    development = settings.app_env == "development"
+    allowed_hosts = settings.dev_ssrf_allowed_hosts if development else ()
+    extra_ca_file = settings.dev_extra_ca_file if development else None
+    origins = settings.dev_target_origins if development else {}
+    extra_ports = settings.dev_target_ports if development else frozenset()
+    client = create_safe_client(
+        allowed_hosts=allowed_hosts, extra_ports=extra_ports, extra_ca_file=extra_ca_file
+    )
     try:
         scanners = load_scanners(
             configs,
@@ -68,11 +74,14 @@ def build_worker_runtime() -> WorkerRuntime:
             allowed_hosts=allowed_hosts,
             extra_ca_file=extra_ca_file,
             app_env=settings.app_env,
+            extra_ports=extra_ports,
         )
     except BaseException:
         client.close()
         raise
     atexit.register(client.close)
+    if origins:
+        scanners = tuple(_ScannerWithTargetOrigin(scanner, origins) for scanner in scanners)
     return WorkerRuntime(sessions, scanners, policy)
 
 
@@ -92,6 +101,20 @@ def _mark_failed(scan_id: uuid.UUID, reason: str) -> None:
         if scan is not None and scan.status in (ScanStatus.PENDING, ScanStatus.RUNNING):
             scans.save(scan.fail(reason, datetime.now(UTC)))
             session.commit()
+
+
+class _ScannerWithTargetOrigin:
+    """Démo : scanne l'origine configurée (port, http) d'un nom dont la propriété est prouvée."""
+
+    def __init__(self, scanner: Scanner, origins: Mapping[str, str]) -> None:
+        self._scanner = scanner
+        self._origins = origins
+        self.name = scanner.name
+        self.category = scanner.category
+
+    def run(self, target: Target) -> list[Finding]:
+        origin = self._origins.get(urlsplit(target.url).hostname or "")
+        return self._scanner.run(target if origin is None else replace(target, url=origin))
 
 
 class _ScanDeadlineExceeded(BaseException):

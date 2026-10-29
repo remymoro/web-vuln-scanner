@@ -23,6 +23,7 @@ def env(monkeypatch, tmp_path):
         "APP_ENV",
         "DEV_SSRF_ALLOWED_HOSTS",
         "DEV_EXTRA_CA_FILE",
+        "DEV_TARGET_ORIGINS",
         "DNS_NAMESERVERS",
     ):
         monkeypatch.delenv(name, raising=False)
@@ -45,6 +46,8 @@ def test_reads_environment_with_defaults(env):
     assert settings.app_env == "production"
     assert settings.dev_ssrf_allowed_hosts == []
     assert settings.dev_extra_ca_file is None
+    assert settings.dev_target_origins == {}
+    assert settings.dev_target_ports == frozenset()
     assert settings.dns_nameservers is None
 
 
@@ -104,6 +107,7 @@ def test_accepts_secure_redis(env):
     [
         ("DEV_SSRF_ALLOWED_HOSTS", '["demo.scanner.test"]'),
         ("DEV_EXTRA_CA_FILE", "/certs/ca.crt"),
+        ("DEV_TARGET_ORIGINS", '{"demo.scanner.test": "http://demo.scanner.test:3000/"}'),
     ],
 )
 def test_demo_exceptions_rejected_outside_development(env, app_env, name, value):
@@ -144,5 +148,38 @@ def test_explicit_nameservers_allowed_in_every_environment(env, app_env):
 def test_invalid_demo_or_dns_settings(env, name, value):
     env.setenv("APP_ENV", "development")
     env.setenv(name, value)
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+def test_development_target_origin_gives_its_extra_port(env):
+    env.setenv("APP_ENV", "development")
+    env.setenv("DEV_SSRF_ALLOWED_HOSTS", '["juiceshop.lab"]')
+    env.setenv("DEV_TARGET_ORIGINS", '{"juiceshop.lab": "http://juiceshop.lab:3000/"}')
+    settings = Settings()
+    assert settings.dev_target_origins == {"juiceshop.lab": "http://juiceshop.lab:3000/"}
+    assert settings.dev_target_ports == frozenset({("juiceshop.lab", 3000)})
+
+
+@pytest.mark.parametrize(
+    "origins",
+    [
+        '{"juiceshop.lab": "http://juiceshop.lab/"}',
+        '{"juiceshop.lab": "http://juiceshop.lab:0/"}',
+        '{"juiceshop.lab": "http://juiceshop.lab:99999/"}',
+        '{"juiceshop.lab": "http://juiceshop.lab:3000"}',
+        '{"juiceshop.lab": "http://juiceshop.lab:3000/admin"}',
+        '{"juiceshop.lab": "http://juiceshop.lab:3000/?a=1"}',
+        '{"juiceshop.lab": "http://user@juiceshop.lab:3000/"}',
+        '{"juiceshop.lab": "http://other.lab:3000/"}',
+        '{"juiceshop.lab": "ftp://juiceshop.lab:3000/"}',
+        '{"JuiceShop.lab": "http://JuiceShop.lab:3000/"}',
+        '{"other.lab": "http://other.lab:3000/"}',
+    ],
+)
+def test_invalid_target_origins(env, origins):
+    env.setenv("APP_ENV", "development")
+    env.setenv("DEV_SSRF_ALLOWED_HOSTS", '["juiceshop.lab"]')
+    env.setenv("DEV_TARGET_ORIGINS", origins)
     with pytest.raises(ValidationError):
         Settings()

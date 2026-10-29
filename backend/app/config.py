@@ -4,6 +4,7 @@ from functools import lru_cache
 from ipaddress import IPv4Address, IPv6Address
 from pathlib import Path
 from typing import Literal, Self
+from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -17,6 +18,8 @@ class Settings(BaseSettings):
     app_env: Literal["development", "test", "production"] = "production"
     dev_ssrf_allowed_hosts: list[str] = Field(default_factory=list)
     dev_extra_ca_file: Path | None = None
+    # Démo : origine réellement scannée pour un nom vérifié, ex. http://juiceshop.lab:3000/.
+    dev_target_origins: dict[str, str] = Field(default_factory=dict)
     dns_nameservers: list[IPv4Address | IPv6Address] | None = None
     database_url: str = Field(pattern=r"^postgresql\+psycopg://")
     redis_url: str = Field(pattern=r"^rediss?://[^/\s]+")
@@ -36,6 +39,28 @@ class Settings(BaseSettings):
             raise ValueError("Use exact lowercase ASCII hostnames without URLs or trailing dots")
         return hosts
 
+    @field_validator("dev_target_origins")
+    @classmethod
+    def exact_origins(cls, origins: dict[str, str]) -> dict[str, str]:
+        for host, origin in origins.items():
+            parsed = urlsplit(origin)
+            if (
+                normalize_domain(host) != host
+                or parsed.scheme not in {"http", "https"}
+                or parsed.hostname != host
+                or parsed.netloc != f"{host}:{parsed.port}"
+                or not 1 <= parsed.port <= 65535
+                or parsed.path != "/"
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError("Use origins like http://host:port/ keyed by their exact host")
+        return origins
+
+    @property
+    def dev_target_ports(self) -> frozenset[tuple[str, int]]:
+        return frozenset((host, urlsplit(o).port) for host, o in self.dev_target_origins.items())
+
     @field_validator("dns_nameservers")
     @classmethod
     def nonempty_nameservers(
@@ -48,9 +73,13 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def development_exceptions(self) -> Self:
         if self.app_env != "development" and (
-            self.dev_ssrf_allowed_hosts or self.dev_extra_ca_file is not None
+            self.dev_ssrf_allowed_hosts
+            or self.dev_extra_ca_file is not None
+            or self.dev_target_origins
         ):
             raise ValueError("Demo exceptions require app_env=development")
+        if not self.dev_target_origins.keys() <= set(self.dev_ssrf_allowed_hosts):
+            raise ValueError("DEV_TARGET_ORIGINS hosts must be in DEV_SSRF_ALLOWED_HOSTS")
         return self
 
 

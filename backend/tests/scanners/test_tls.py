@@ -210,3 +210,19 @@ def test_invalid_target_fails_before_dns_and_probe(dns, url):
         TlsScanner(probe, RULES).run(Target(url))
     assert dns[1] == []
     probe.scan.assert_not_called()
+
+
+def test_demo_origin_port_is_accepted_but_tls_is_still_probed_on_443(dns):
+    dns[0][:] = ["10.10.10.30"]
+    probe = Mock()
+    probe.scan.return_value = CLEAN
+    scanner = TlsScanner(
+        probe,
+        RULES,
+        allowed_hosts={"juiceshop.lab"},
+        extra_ports={("juiceshop.lab", 3000)},
+    )
+    assert scanner.run(Target("http://juiceshop.lab:3000/")) == []
+    assert dns[1] == [("juiceshop.lab", 443)]
+    with pytest.raises(SsrfBlockedError):
+        scanner.run(Target("http://juiceshop.lab:3001/"))

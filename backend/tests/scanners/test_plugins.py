@@ -446,5 +446,6 @@ def test_zap_factory_receives_context_options_and_environment(monkeypatch, tmp_p
     assert scanner_args.args[1] == load_zap_rules(tmp_path / "custom_zap.yaml")
     assert scanner_args.kwargs == {
         "allowed_hosts": frozenset({"demo.scanner.test"}),
+        "extra_ports": frozenset(),
         "lock": fake_lock,
     }

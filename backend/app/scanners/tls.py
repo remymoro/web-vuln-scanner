@@ -166,11 +166,17 @@ class TlsScanner:
     category = "TLS"
 
     def __init__(
-        self, probe: TlsProbe, rules: Sequence[TlsRule], *, allowed_hosts: Iterable[str] = ()
+        self,
+        probe: TlsProbe,
+        rules: Sequence[TlsRule],
+        *,
+        allowed_hosts: Iterable[str] = (),
+        extra_ports: Iterable[tuple[str, int]] = (),
     ) -> None:
         self._probe = probe
         self._rules = tuple(rules)
         self._allowed_hosts = frozenset(allowed_hosts)
+        self._extra_ports = frozenset(extra_ports)
 
     def run(self, target: Target) -> list[Finding]:
         try:
@@ -179,7 +185,10 @@ class TlsScanner:
                 url.scheme not in {"http", "https"}
                 or not url.hostname
                 or "@" in url.netloc
-                or url.port not in {None, 80, 443}
+                or (
+                    url.port not in {None, 80, 443}
+                    and (url.hostname, url.port) not in self._extra_ports
+                )
             ):
                 raise ValueError("Invalid TLS target URL")
             host = url.hostname.encode("idna").decode("ascii")

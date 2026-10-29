@@ -646,3 +646,21 @@ def test_redis_lock_translates_redis_errors():
     with pytest.raises(ZapProbeError, match="release"):
         with lock:
             pass
+
+
+def test_demo_origin_port_is_accepted_only_for_its_host(dns):
+    dns[0][:] = ["10.10.10.30"]
+    probe = Mock()
+    probe.scan.return_value = ()
+    scanner = ZapPassiveScanner(
+        probe,
+        RULES,
+        allowed_hosts={"juiceshop.lab", "other.lab"},
+        extra_ports={("juiceshop.lab", 3000)},
+    )
+    assert scanner.run(Target("http://juiceshop.lab:3000/")) == []
+    probe.scan.assert_called_once_with(Target("http://juiceshop.lab:3000/"))
+    for url in ("http://other.lab:3000/", "http://juiceshop.lab:8080/"):
+        with pytest.raises(SsrfBlockedError):
+            scanner.run(Target(url))
+    assert probe.scan.call_count == 1

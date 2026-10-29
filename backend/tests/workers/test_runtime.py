@@ -5,6 +5,7 @@ import pytest
 
 from app.config import Settings
 from app.domain.scoring import DEFAULT_POLICY
+from app.domain.target import Target
 from app.infra.scanners_config import ScannerConfig
 from app.scanners import plugins
 from app.workers import jobs
@@ -38,6 +39,7 @@ def test_worker_passes_demo_options_only_in_development(monkeypatch, app_env):
     runtime = jobs.build_worker_runtime()
     factory.assert_called_once_with(
         allowed_hosts=["demo.scanner.test"] if app_env == "development" else (),
+        extra_ports=frozenset(),
         extra_ca_file=Path("/certs/ca.crt") if app_env == "development" else None,
     )
     expected_scanners = (
@@ -50,6 +52,7 @@ def test_worker_passes_demo_options_only_in_development(monkeypatch, app_env):
         "allowed_hosts": ["demo.scanner.test"] if app_env == "development" else (),
         "extra_ca_file": Path("/certs/ca.crt") if app_env == "development" else None,
         "app_env": app_env,
+        "extra_ports": frozenset(),
     }
     probe_factory.assert_called_once_with(
         network_timeout=3,
@@ -76,7 +79,9 @@ def test_worker_provides_safe_client_to_plugin(monkeypatch, tmp_path):
     runtime = jobs.build_worker_runtime()
     assert runtime.scanners == (factory.return_value,)
     assert factory.call_args.args[0].client is safe_client
-    create_client.assert_called_once_with(allowed_hosts=(), extra_ca_file=None)
+    create_client.assert_called_once_with(
+        allowed_hosts=(), extra_ports=frozenset(), extra_ca_file=None
+    )
 
 
 def test_startup_fails_before_listening_to_redis(monkeypatch):
@@ -107,3 +112,45 @@ def test_client_is_closed_when_plugin_configuration_fails(monkeypatch):
     with pytest.raises(ValueError, match="Invalid Scanner contract"):
         jobs.build_worker_runtime()
     client.close.assert_called_once_with()
+
+
+def test_worker_scans_configured_origin_only_in_development(monkeypatch, tmp_path):
+    settings = Settings(
+        _env_file=None,
+        database_url="postgresql+psycopg://x:y@localhost/z",
+        redis_url="redis://localhost:6380/0",
+        jwt_secret="t" * 32,
+        app_env="development",
+        dev_ssrf_allowed_hosts=["juiceshop.lab"],
+        dev_target_origins={"juiceshop.lab": "http://juiceshop.lab:3000/"},
+    )
+    inner = Mock(name="inner")
+    inner.name, inner.category = "fake", "Fake"
+    inner.run.return_value = []
+    create_client = Mock()
+    load = Mock(return_value=(inner,))
+    monkeypatch.setattr(jobs, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(jobs, "get_settings", lambda: settings)
+    monkeypatch.setattr(jobs, "get_worker_sessions", Mock())
+    monkeypatch.setattr(jobs, "load_scoring_policy", lambda path: DEFAULT_POLICY)
+    monkeypatch.setattr(jobs, "load_scanners_config", lambda path: [])
+    monkeypatch.setattr(jobs, "create_safe_client", create_client)
+    monkeypatch.setattr(jobs, "load_scanners", load)
+    monkeypatch.setattr(jobs.atexit, "register", Mock())
+
+    (scanner,) = jobs.build_worker_runtime().scanners
+    assert create_client.call_args.kwargs["extra_ports"] == {("juiceshop.lab", 3000)}
+    assert load.call_args.kwargs["extra_ports"] == {("juiceshop.lab", 3000)}
+    assert (scanner.name, scanner.category) == ("fake", "Fake")
+    scanner.run(Target("https://juiceshop.lab/"))
+    scanner.run(Target("https://demo.scanner.test/"))
+    assert [call.args[0].url for call in inner.run.call_args_list] == [
+        "http://juiceshop.lab:3000/",
+        "https://demo.scanner.test/",
+    ]
+
+    production = settings.model_copy(update={"app_env": "production"})
+    monkeypatch.setattr(jobs, "get_settings", lambda: production)
+    (scanner,) = jobs.build_worker_runtime().scanners
+    assert scanner is inner
+    assert create_client.call_args.kwargs["extra_ports"] == frozenset()
