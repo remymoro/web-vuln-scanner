@@ -76,7 +76,23 @@ def resolve_and_check(host: str, port: int, *, allowed_hosts: Iterable[str] = ()
     return ips
 
 
-def _check_url_parts(url: str | httpx.URL) -> tuple[str, int]:
+def _port_allowed(host: str, port: int, extra_ports: frozenset[tuple[str, int]]) -> bool:
+    return port in ALLOWED_PORTS or (host, port) in extra_ports
+
+
+def _check_extra_ports(
+    extra_ports: Iterable[tuple[str, int]], allowed_hosts: frozenset[str]
+) -> frozenset[tuple[str, int]]:
+    # Exception de démo : un port hors 80/443 n'est accepté que pour un nom déjà autorisé.
+    extra_ports = frozenset(extra_ports)
+    if any(host not in allowed_hosts or not 1 <= port <= 65535 for host, port in extra_ports):
+        raise ValueError("Extra ports require an allowed host and a valid port")
+    return extra_ports
+
+
+def _check_url_parts(
+    url: str | httpx.URL, extra_ports: frozenset[tuple[str, int]] = frozenset()
+) -> tuple[str, int]:
     try:
         has_userinfo = isinstance(url, str) and "@" in urlsplit(url).netloc
         parsed = httpx.URL(url)
@@ -87,15 +103,21 @@ def _check_url_parts(url: str | httpx.URL) -> tuple[str, int]:
     if not parsed.host:
         raise SsrfBlockedError("Host must not be empty")
     port = parsed.port if parsed.port is not None else (443 if parsed.scheme == "https" else 80)
-    if port not in ALLOWED_PORTS:
+    if not _port_allowed(parsed.host, port, extra_ports):
         raise SsrfBlockedError(f"Port {port} is forbidden; use 80 or 443")
     if has_userinfo or parsed.userinfo:
         raise SsrfBlockedError("Userinfo is forbidden in target URLs")
     return parsed.host, port
 
 
-def check_url(url: str | httpx.URL, *, allowed_hosts: Iterable[str] = ()) -> None:
-    host, port = _check_url_parts(url)
+def check_url(
+    url: str | httpx.URL,
+    *,
+    allowed_hosts: Iterable[str] = (),
+    extra_ports: Iterable[tuple[str, int]] = (),
+) -> None:
+    allowed_hosts = frozenset(allowed_hosts)
+    host, port = _check_url_parts(url, _check_extra_ports(extra_ports, allowed_hosts))
     resolve_and_check(host, port, allowed_hosts=allowed_hosts)
 
 
@@ -107,9 +129,11 @@ class GuardedNetworkBackend(httpcore.NetworkBackend):
         backend: httpcore.NetworkBackend | None = None,
         *,
         allowed_hosts: Iterable[str] = (),
+        extra_ports: Iterable[tuple[str, int]] = (),
     ) -> None:
         self._backend = backend if backend is not None else httpcore.SyncBackend()
         self._allowed_hosts = frozenset(allowed_hosts)
+        self._extra_ports = _check_extra_ports(extra_ports, self._allowed_hosts)
 
     def connect_tcp(
         self,
@@ -119,7 +143,7 @@ class GuardedNetworkBackend(httpcore.NetworkBackend):
         local_address: str | None = None,
         socket_options: Iterable[_SOCKET_OPTION] | None = None,
     ) -> httpcore.NetworkStream:
-        if port not in ALLOWED_PORTS:
+        if not _port_allowed(host, port, self._extra_ports):
             raise SsrfBlockedError(f"Port {port} is forbidden; use 80 or 443")
         ips = resolve_and_check(host, port, allowed_hosts=self._allowed_hosts)
         # Réutilisable même si l'appelant fournit un générateur d'options.
@@ -156,8 +180,10 @@ class _GuardedTransport(httpx.HTTPTransport):
         network_backend: httpcore.NetworkBackend | None = None,
         *,
         allowed_hosts: Iterable[str] = (),
+        extra_ports: Iterable[tuple[str, int]] = (),
         extra_ca_file: str | Path | None = None,
     ) -> None:
+        self._extra_ports = _check_extra_ports(extra_ports, frozenset(allowed_hosts))
         limits = httpx.Limits()
         super().__init__(verify=True, trust_env=False, limits=limits, retries=0)
         original_pool = self._pool
@@ -173,14 +199,16 @@ class _GuardedTransport(httpx.HTTPTransport):
             http1=True,
             http2=False,
             retries=0,
-            network_backend=GuardedNetworkBackend(network_backend, allowed_hosts=allowed_hosts),
+            network_backend=GuardedNetworkBackend(
+                network_backend, allowed_hosts=allowed_hosts, extra_ports=self._extra_ports
+            ),
         )
         original_pool.close()
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
         # Appliquer aussi la politique d'URL aux appels directs du client, même
         # lorsqu'une connexion existante peut être réutilisée par le pool.
-        _check_url_parts(request.url)
+        _check_url_parts(request.url, self._extra_ports)
         return super().handle_request(request)
 
 
@@ -191,12 +219,17 @@ class _SafeClient(httpx.Client):
         *,
         network_backend: httpcore.NetworkBackend | None,
         allowed_hosts: Iterable[str],
+        extra_ports: Iterable[tuple[str, int]],
         extra_ca_file: str | Path | None,
     ) -> None:
         self.allowed_hosts = frozenset(allowed_hosts)
+        self.extra_ports = _check_extra_ports(extra_ports, self.allowed_hosts)
         super().__init__(
             transport=_GuardedTransport(
-                network_backend, allowed_hosts=self.allowed_hosts, extra_ca_file=extra_ca_file
+                network_backend,
+                allowed_hosts=self.allowed_hosts,
+                extra_ports=self.extra_ports,
+                extra_ca_file=extra_ca_file,
             ),
             timeout=timeout,
             follow_redirects=False,
@@ -209,12 +242,14 @@ def _create_safe_client(
     *,
     network_backend: httpcore.NetworkBackend | None = None,
     allowed_hosts: Iterable[str] = (),
+    extra_ports: Iterable[tuple[str, int]] = (),
     extra_ca_file: str | Path | None = None,
 ) -> httpx.Client:
     return _SafeClient(
         timeout,
         network_backend=network_backend,
         allowed_hosts=allowed_hosts,
+        extra_ports=extra_ports,
         extra_ca_file=extra_ca_file,
     )
 
@@ -223,10 +258,13 @@ def create_safe_client(
     timeout: float = 10.0,
     *,
     allowed_hosts: Iterable[str] = (),
+    extra_ports: Iterable[tuple[str, int]] = (),
     extra_ca_file: str | Path | None = None,
 ) -> httpx.Client:
     """Seule fabrique de clients HTTP autorisée pour contacter une cible."""
-    return _create_safe_client(timeout, allowed_hosts=allowed_hosts, extra_ca_file=extra_ca_file)
+    return _create_safe_client(
+        timeout, allowed_hosts=allowed_hosts, extra_ports=extra_ports, extra_ca_file=extra_ca_file
+    )
 
 
 def safe_get(client: httpx.Client, url: str, max_redirects: int = 5) -> httpx.Response:
@@ -234,8 +272,11 @@ def safe_get(client: httpx.Client, url: str, max_redirects: int = 5) -> httpx.Re
         raise SsrfBlockedError("Redirect limit must not be negative")
     redirects = 0
     while True:
+        safe = isinstance(client, _SafeClient)
         check_url(
-            url, allowed_hosts=client.allowed_hosts if isinstance(client, _SafeClient) else ()
+            url,
+            allowed_hosts=client.allowed_hosts if safe else (),
+            extra_ports=client.extra_ports if safe else (),
         )
         response = client.get(url, follow_redirects=False)
         location = response.headers.get("location")

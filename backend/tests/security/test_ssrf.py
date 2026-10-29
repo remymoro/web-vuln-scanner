@@ -534,3 +534,65 @@ def test_extra_ca_extends_verified_context_and_ignores_environment(tmp_path, mon
 def test_extra_ca_missing_file_is_not_ignored(tmp_path):
     with pytest.raises(FileNotFoundError):
         create_safe_client(extra_ca_file=tmp_path / "missing.crt")
+
+
+@pytest.mark.parametrize("direct", [False, True])
+def test_demo_extra_port_is_allowed_for_its_exact_host_only(dns, direct):
+    dns[0]["example.test"] = ["10.0.0.1"]
+    dns[0]["other.test"] = ["10.0.0.2"]
+    wrapped = FakeBackend()
+    with _create_safe_client(
+        network_backend=wrapped,
+        allowed_hosts=["example.test", "other.test"],
+        extra_ports=[("example.test", 3000)],
+    ) as client:
+        get = client.get if direct else lambda url: safe_get(client, url)
+        assert get("http://example.test:3000/").text == "OK"
+        for url in ("http://other.test:3000/", "http://example.test:3001/"):
+            with pytest.raises(SsrfBlockedError, match="Port"):
+                get(url)
+    assert [call[:2] for call in wrapped.calls] == [("10.0.0.1", 3000)]
+
+
+def test_demo_extra_port_redirect_to_another_port_is_blocked(dns):
+    dns[0]["example.test"] = ["10.0.0.1"]
+
+    class RedirectBackend(FakeBackend):
+        def connect_tcp(self, *args, **kwargs):
+            stream = super().connect_tcp(*args, **kwargs)
+            stream.data = (
+                b"HTTP/1.1 302 Found\r\nLocation: http://example.test:8080/\r\n"
+                b"Content-Length: 0\r\n\r\n"
+            )
+            return stream
+
+    wrapped = RedirectBackend()
+    with _create_safe_client(
+        network_backend=wrapped,
+        allowed_hosts=["example.test"],
+        extra_ports=[("example.test", 3000)],
+    ) as client:
+        with pytest.raises(SsrfBlockedError, match="Port 8080"):
+            safe_get(client, "http://example.test:3000/")
+    assert [call[:2] for call in wrapped.calls] == [("10.0.0.1", 3000)]
+
+
+@pytest.mark.parametrize("extra_ports", [[("example.test", 3000)], [("other.test", 0)]])
+def test_demo_extra_port_requires_an_allowed_host_and_valid_port(extra_ports):
+    with pytest.raises(ValueError, match="Extra ports"):
+        create_safe_client(allowed_hosts=["other.test"], extra_ports=extra_ports)
+    with pytest.raises(ValueError, match="Extra ports"):
+        GuardedNetworkBackend(FakeBackend(), allowed_hosts=["other.test"], extra_ports=extra_ports)
+
+
+def test_demo_extra_port_does_not_bypass_ip_policy(dns):
+    dns[0]["example.test"] = ["127.0.0.1"]
+    wrapped = FakeBackend()
+    with _create_safe_client(
+        network_backend=wrapped,
+        allowed_hosts=["example.test"],
+        extra_ports=[("example.test", 3000)],
+    ) as client:
+        with pytest.raises(SsrfBlockedError, match="Forbidden IP"):
+            client.get("http://example.test:3000/")
+    assert wrapped.calls == []
